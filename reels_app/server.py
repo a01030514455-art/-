@@ -6,9 +6,9 @@ import traceback
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
-from . import hooks, images, pipeline
+from . import hooks, images, pipeline, stock, voices
 from .config import APP_DIR, IMAGES_DIR, OUTPUT_DIR, ROOT, ffmpeg_exe, load_settings
 
 STATIC = APP_DIR / "static"
@@ -97,6 +97,14 @@ class Handler(BaseHTTPRequestHandler):
             if not any(p.is_relative_to(r) for r in ALLOWED_FILE_ROOTS):
                 return self._json({"error": "forbidden"}, 403)
             return self._file(p)
+        qs = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items()}
+        if path == "/api/voices":
+            return self._json(voices.list_voices(qs.get("engine", "edge"), load_settings()))
+        if path == "/api/usage":
+            s = load_settings()
+            az = voices.azure_conf(s)
+            return self._json({**voices.month_usage(), "azure_limit": voices.AZURE_FREE_CHARS, "azure_tier": az["tier"],
+                               "azure_ready": bool(az["key"] and az["region"])})
         if path == "/api/status":
             s = load_settings()
             try:
@@ -105,6 +113,11 @@ class Handler(BaseHTTPRequestHandler):
                 has_ffmpeg = False
             return self._json({"ffmpeg": has_ffmpeg, "tts_engine": s["tts_engine"],
                                "topics": hooks.choices(), "hook_styles": hooks.HOOK_STYLES,
+                               "voice_default": {"engine": s["tts_engine"], "voice": s.get("tts_voice"),
+                                                 "speed": s["tts_speed"], "volume": s.get("tts_volume", 1.0)},
+                               "azure_ready": all(voices.azure_conf(s)[k] for k in ("key", "region")),
+                               "azure_tier": voices.azure_conf(s)["tier"], "azure_region": voices.azure_conf(s)["region"],
+                               "stock_ready": {k: bool(v) for k, v in stock.keys(s).items()},
                                "tts_speed": s["tts_speed"],
                                "ai_model": s["ai_model"], "jobs": pipeline.list_jobs()})
         parts = path.strip("/").split("/")
@@ -123,7 +136,33 @@ class Handler(BaseHTTPRequestHandler):
 
     def _post(self):
         parts = urlparse(self.path).path.strip("/").split("/")
+        qs = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items()}
         try:
+            if len(parts) == 4 and parts[:2] == ["api", "jobs"] and parts[3] == "stock_import":
+                n = int(self.headers.get("Content-Length") or 0)
+                data = self.rfile.read(n)
+                job = pipeline.get(parts[2])
+                return self._json(job.stock_import(data, qs.get("name", "clip.mp4"), qs.get("source_url", ""),
+                                                   qs.get("author", ""), qs.get("query", "")))
+            if parts == ["api", "settings", "voice"]:
+                body = self._body()
+                upd = {"tts_engine": body.get("engine") or "auto", "tts_voice": body.get("voice") or "ko-KR-SunHiNeural",
+                       "tts_speed": round(min(1.6, max(0.7, float(body.get("speed") or 1.1))), 2),
+                       "tts_volume": round(min(1.5, max(0.5, float(body.get("volume") or 1.0))), 2)}
+                voices.save_local_settings(upd)
+                return self._json({"ok": True, "saved": upd})
+            if parts == ["api", "settings", "keys"]:
+                body = self._body()
+                upd = {k: str(body[k]).strip() for k in ("azure_key", "azure_region", "azure_tier", "pexels_key", "pixabay_key")
+                       if body.get(k) not in (None, "")}
+                if upd.get("azure_tier") and upd["azure_tier"] not in ("F0", "S0"):
+                    return self._json({"error": "Azure 티어는 F0 또는 S0만 가능합니다"}, 400)
+                voices.save_local_settings(upd)
+                voices._voice_cache.clear()
+                return self._json({"ok": True, "saved": sorted(upd)})
+            if parts == ["api", "preview_voice"]:
+                body = self._body()
+                return self._json(pipeline.preview(body.get("text") or "", body, OUTPUT_DIR / "voice_preview"))
             if len(parts) == 4 and parts[:2] == ["api", "jobs"] and parts[3] == "upload":
                 n = int(self.headers.get("Content-Length") or 0)
                 if n > images.MAX_UPLOAD:
@@ -157,8 +196,16 @@ class Handler(BaseHTTPRequestHandler):
                     job.start_ai()
                     return self._json({"ok": True})
                 if action == "render":
-                    job.start_render(body.get("tts_engine"), body.get("tts_speed"))
+                    job.start_render(body.get("tts_engine"), body.get("tts_speed"),
+                                     {"voice": body.get("voice"), "volume": body.get("volume")},
+                                     bool(body.get("auto_stock")), bool(body.get("approved")))
                     return self._json({"ok": True})
+                if action == "stock_search":
+                    return self._json(stock.search(body.get("provider", "pexels"), body.get("query", ""), load_settings()))
+                if action == "stock_add":
+                    return self._json(job.stock_add(body.get("item") or {}, body.get("query", "")))
+                if action == "stock_remove":
+                    return self._json(job.stock_remove(body.get("clip_id", "")))
                 if action == "rebuild":
                     return self._json(job.rebuild_script(body.get("topic_id") or "auto",
                                                          body.get("hook_style") or "question"))
@@ -167,8 +214,11 @@ class Handler(BaseHTTPRequestHandler):
                 if action == "image_edit":
                     return self._json(job.edit_image(body.get("index"), body.get("edits") or {}))
                 if action == "preview":
-                    return self._json(job.preview_voice(body.get("text") or "", body.get("tts_engine"),
-                                                        body.get("tts_speed")))
+                    return self._json(job.preview_voice(body.get("text") or "", body))
+        except pipeline.ApprovalNeeded as e:
+            return self._json({"error": str(e), "need_approval": e.info}, 402)
+        except KeyError:
+            return self._json({"error": "작업을 찾을 수 없습니다"}, 404)
         except RuntimeError as e:
             return self._json({"error": str(e)}, 409)
         return self._json({"error": "not found"}, 404)

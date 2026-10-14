@@ -6,7 +6,7 @@ import traceback
 import uuid
 from pathlib import Path
 
-from . import ai_script, extractor, images, render, script_rules, tts
+from . import ai_script, extractor, images, render, script_rules, stock, tts, voices
 from .config import OUTPUT_DIR, ROOT, load_settings
 
 JOBS: dict = {}
@@ -56,8 +56,10 @@ class Job:
             s["script"] = script_for_ui(s["script"])
         if self.post:
             s["images"] = [self._image_public(b) for b in self.post["images"]]
+        s["stock_clips"] = [dict(c, url=_web(c["file"])) for c in self.state.get("stock_clips", [])]
         if s["result"]:
-            s["result"] = dict(s["result"], video_url=_web(s["result"]["video"]), srt_url=_web(s["result"]["srt"]))
+            s["result"] = dict(s["result"], video_url=_web(s["result"]["video"]), srt_url=_web(s["result"]["srt"]),
+                               credits_url=_web(s["result"]["credits"]) if s["result"].get("credits") else "")
         return s
 
     # ---- 사진 편집 ----
@@ -107,6 +109,22 @@ class Job:
         self.log(f"내 사진 추가: {index}번")
         return self._image_public(b)
 
+    def _attach_clips(self, script, auto_stock):
+        """사용자가 고른 보조 영상을 장면에 붙인다. auto_stock이면 사진이 없어 같은 사진을 반복하는
+        설명 장면(왜/소개/이번 현장/포인트)에만 남은 보조 영상을 하나씩 채운다. 원본 사진이 항상 우선."""
+        lib = {c["clip_id"]: c for c in self.stock_library() if Path(c["file"]).exists()}
+        unused = [c for cid, c in lib.items() if cid not in {s.get("clip_id") for s in script["scenes"]}]
+        scenes = []
+        for s in script["scenes"]:
+            s = dict(s)
+            if s.get("clip_id") in lib:
+                s["clip"] = lib[s["clip_id"]]
+            elif (auto_stock and unused and s.get("kind") == "body" and s.get("role") in ("why", "intro", "lead", "point")
+                  and (s.get("reused") or not s.get("images"))):
+                s["clip"] = unused.pop(0)
+            scenes.append(s)
+        return dict(script, scenes=scenes)
+
     def rebuild_script(self, topic_id="auto", hook_style="question"):
         """주제·훅 스타일을 바꿔 무료 대본을 다시 만든다(AI 미사용)."""
         if not self.post:
@@ -133,10 +151,11 @@ class Job:
         self.log(f"사진 {b['index']} 삭제")
         return {"ok": True, "index": b["index"]}
 
-    def _resolve_images(self, script):
-        """대본의 사진을 현재 편집 상태(편집본 파일·중심점)로 바꿔 렌더링에 넘긴다."""
+    def _resolve_images(self, script, auto_stock=False):
+        """대본의 사진을 현재 편집 상태(편집본 파일·중심점)로 바꾸고, 보조 영상을 붙여 렌더링에 넘긴다."""
         if not self.post:
             return script
+        script = self._attach_clips(script, auto_stock)
         by_index = {b["index"]: b for b in self.post["images"]}
         scenes = []
         for s in script["scenes"]:
@@ -212,35 +231,73 @@ class Job:
         for s in ui_script["scenes"]:
             hl = [h.strip() for h in str(s.get("highlight", "")).split(",") if h.strip()]
             scenes.append({"narration": s["narration"].strip(), "label": s.get("label", "").strip(),
-                           "kind": s.get("kind", "body"), "highlight": hl,
+                           "kind": s.get("kind", "body"), "role": s.get("role", ""), "highlight": hl,
+                           "clip_id": s.get("clip_id") or "",
                            "images": [by_index[i] for i in s.get("images", []) if i in by_index]})
         self.state["script"] = dict(self.state["script"], scenes=[s for s in scenes if s["narration"]],
                                     end_header=ui_script.get("end_header", self.state["script"]["end_header"]))
         self.state["script_edited"] = True
         self.save()
 
-    def start_render(self, tts_engine=None, tts_speed=None):
+    def start_render(self, tts_engine=None, tts_speed=None, voice_opts=None, auto_stock=False, approved=False):
         if not self.state.get("script"):
             raise RuntimeError("대본이 없습니다. 먼저 블로그 글을 가져오세요.")
-        self._run(lambda: self._render(tts_engine, tts_speed))
+        settings = _voice_settings(tts_engine, tts_speed, voice_opts)
+        if settings["tts_engine"] == "azure":  # 비용·한도 확인은 작업 시작 전에(승인 대화를 위해)
+            chk = azure_needed(self.state["script"], self.dir / "tts", settings)
+            if chk["level"] == "block" or (chk["level"] in ("warn", "billable") and not approved):
+                raise ApprovalNeeded(chk)
+        self._run(lambda: self._render(tts_engine, tts_speed, voice_opts, auto_stock, approved=True))
 
-    def preview_voice(self, text, tts_engine=None, tts_speed=None):
-        """선택한 배속으로 한 문장만 미리 만들어 들려준다(무료, 결과는 캐시되어 영상 만들 때 재사용)."""
-        if not text.strip():
-            raise RuntimeError("미리 들을 문장이 없습니다.")
-        settings = _voice_settings(tts_engine, tts_speed)
-        v = tts.synth(text.strip()[:200], self.dir / "tts", settings, self.log)
-        return {"url": _web(v["file"]), "seconds": round(v["seconds"], 2), "engine": v["engine"]}
+    def preview_voice(self, text, voice_opts=None):
+        """선택한 음성·배속·음량으로 한 문장만 미리 만들어 들려준다(결과는 캐시되어 영상 만들 때 재사용)."""
+        return preview(text, voice_opts, self.dir / "tts", self.log)
 
-    def _render(self, tts_engine, tts_speed=None):
-        settings = _voice_settings(tts_engine, tts_speed)
-        self.state["voice"] = {"engine": settings["tts_engine"], "speed": settings["tts_speed"]}
+    # ---- 무료 스톡 영상(보조 장면) ----
+    def stock_library(self):
+        return self.state.setdefault("stock_clips", [])
+
+    def stock_add(self, item, query):
+        clip = stock.download(item, self.dir, query)
+        lib = [c for c in self.stock_library() if c["clip_id"] != clip["clip_id"]] + [clip]
+        self.state["stock_clips"] = lib
+        self.log(f"보조 영상 추가: {clip['clip_id']} ({clip['license']})")
+        self.save()
+        return clip
+
+    def stock_import(self, data, filename, source_url, author, query=""):
+        clip = stock.import_manual(data, filename, self.dir, source_url, author, query)
+        self.state["stock_clips"] = [c for c in self.stock_library() if c["clip_id"] != clip["clip_id"]] + [clip]
+        self.log(f"보조 영상 등록(직접 받은 파일): {clip['clip_id']}")
+        self.save()
+        return clip
+
+    def stock_remove(self, clip_id):
+        self.state["stock_clips"] = [c for c in self.stock_library() if c["clip_id"] != clip_id]
+        for s in (self.state.get("script") or {}).get("scenes", []):
+            if s.get("clip_id") == clip_id:
+                s["clip_id"] = ""
+        self.save()
+        return {"ok": True}
+
+    def _render(self, tts_engine, tts_speed=None, voice_opts=None, auto_stock=False, approved=False):
+        settings = _voice_settings(tts_engine, tts_speed, voice_opts)
+        self.state["voice"] = {"engine": settings["tts_engine"], "speed": settings["tts_speed"],
+                               "voice": settings.get("tts_voice"), "volume": settings.get("tts_volume", 1.0)}
+        if settings["tts_engine"] == "azure":
+            chk = azure_needed(self.state["script"], self.dir / "tts", settings)
+            if chk["level"] == "block" or (chk["level"] in ("warn", "billable") and not approved):
+                raise ApprovalNeeded(chk)
         self.set(status="rendering", progress=1, message="음성 길이 확인 중")
         script = self.state["script"]
+        pre_usage = {}  # 길이 보정 단계에서 먼저 만든 음성의 사용량
         # 무료 대본이고 사용자가 고치지 않았다면, 실제 음성 속도로 한 번 보정해 40~60초에 맞춘다(TTS 결과는 캐시됨).
         if script["mode"] == "rules" and not self.state["script_edited"] and self.post:
-            secs = sum(tts.synth(s["narration"], self.dir / "tts", settings, self.log)["seconds"] + render.GAP_AFTER
-                       for s in script["scenes"]) + render.CTA_HOLD
+            secs = render.CTA_HOLD
+            for s in script["scenes"]:
+                v = tts.synth(s["narration"], self.dir / "tts", settings, self.log)
+                secs += v["seconds"] + render.GAP_AFTER
+                pre_usage[v["category"]] = pre_usage.get(v["category"], 0) + v.get("chars", 0)
             if not (settings["min_seconds"] + 2 <= secs <= settings["max_seconds"] - 2):
                 chars = sum(script_rules.speech_len(s["narration"]) for s in script["scenes"])
                 cps = chars / max(1.0, secs - render.CTA_HOLD - render.GAP_AFTER * len(script["scenes"]))
@@ -252,23 +309,69 @@ class Job:
                                             topic_id=script.get("topic_choice", "auto"),
                                             hook_style=script.get("hook_style", "question"))
                 self.state["script"] = script
-        res = render.render(self._resolve_images(script), self.dir, settings, log=self.log,
+        res = render.render(self._resolve_images(script, auto_stock), self.dir, settings, log=self.log,
                             progress=lambda p, m="": self.set(progress=p, message=m))
-        eng = {"edge": "Edge 무료 음성(온라인)", "local": "로컬 무료 음성(오프라인)"}
-        self.state["usage"]["tts"] = ", ".join(eng.get(e, e) for e in res["tts_engines"]) + " — 0원"
+        eng = {"edge": "Edge 무료 음성", "local": "PC 내장 음성", "azure": "Azure 음성"}
+        tu = dict(res["tts_usage"])
+        for k, n in pre_usage.items():
+            tu[k] = tu.get(k, 0) + n
+        tu.pop("cache", None)
+        billable = tu.get("azure_billable", 0)
+        self.state["usage"]["tts"] = ", ".join(eng.get(e, e) for e in res["tts_engines"])
+        self.state["usage"]["tts_breakdown"] = tu
+        self.state["usage"]["tts_billable_chars"] = billable
+        self.state["usage"]["tts_free"] = billable == 0
+        if res["clips_used"]:
+            (self.dir / "credits.txt").write_text(stock.credits_text(res["clips_used"]), encoding="utf-8")
+            res["credits"] = str(self.dir / "credits.txt")
         self.state["result"] = res
         for w in res["warnings"]:
             self.log("주의: " + w)
         self.set(status="done", progress=100, message=f"완료: {res['seconds']}초 영상")
 
 
-def _voice_settings(tts_engine=None, tts_speed=None):
+class ApprovalNeeded(RuntimeError):
+    def __init__(self, info):
+        super().__init__(info["message"] or "승인이 필요합니다")
+        self.info = info
+
+
+def _voice_settings(tts_engine=None, tts_speed=None, voice_opts=None):
     settings = load_settings()
     if tts_engine:
         settings["tts_engine"] = tts_engine
     if tts_speed:
         settings["tts_speed"] = round(min(1.6, max(0.7, float(tts_speed))), 2)
+    vo = voice_opts or {}
+    if vo.get("voice"):
+        settings["tts_voice"] = vo["voice"]
+    if vo.get("volume"):
+        settings["tts_volume"] = round(min(1.5, max(0.5, float(vo["volume"]))), 2)
     return settings
+
+
+def azure_needed(script, tts_dir, settings):
+    """캐시에 없는 문장만 세어 Azure 사용 글자 수를 추정(자동 분량 보정 여유 20% 포함)."""
+    speed = float(settings.get("tts_speed", 1.0))
+    vol = float(settings.get("tts_volume", 1.0))
+    need = 0
+    for s in script["scenes"]:
+        need += voices.billable_chars(voices.azure_ssml(s["narration"], settings.get("tts_voice", ""), speed, vol))
+    return voices.azure_precheck(int(need * 1.2), settings)
+
+
+def preview(text, voice_opts, tts_dir, log=print):
+    if not (text or "").strip():
+        raise RuntimeError("미리 들을 문장이 없습니다.")
+    vo = voice_opts or {}
+    settings = _voice_settings(vo.get("engine"), vo.get("speed"), vo)
+    if settings["tts_engine"] == "azure":
+        chk = voices.azure_precheck(voices.billable_chars(voices.azure_ssml(text[:200], settings["tts_voice"], 1, 1)), settings)
+        if chk["level"] in ("block", "billable") and not vo.get("approved"):
+            raise ApprovalNeeded(chk)
+    v = tts.synth(text.strip()[:200], Path(tts_dir), settings, log)
+    return {"url": _web(v["file"]), "seconds": round(v["seconds"], 2), "engine": v["engine"],
+            "voice": settings.get("tts_voice"), "chars": v.get("chars", 0), "category": v.get("category")}
 
 
 def script_for_ui(script):
@@ -276,7 +379,8 @@ def script_for_ui(script):
             "topic_id": script.get("topic_id", "generic"), "topic_name": script.get("topic_name", ""),
             "topic_choice": script.get("topic_choice", "auto"), "hook_style": script.get("hook_style", "question"),
             "scenes": [{"narration": s["narration"], "label": s.get("label", ""), "kind": s.get("kind", "body"),
-                        "highlight": ", ".join(s.get("highlight", [])),
+                        "highlight": ", ".join(s.get("highlight", [])), "role": s.get("role", ""),
+                        "clip_id": s.get("clip_id", ""),
                         "images": [im["index"] for im in s.get("images", []) if "index" in im]}
                        for s in script["scenes"]]}
 

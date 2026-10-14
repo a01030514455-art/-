@@ -45,6 +45,14 @@ video{display:block;width:100%;max-width:340px;aspect-ratio:9/16;margin:0 auto;b
 .editor{display:grid;grid-template-columns:1fr 260px;gap:16px}@media (max-width:760px){.editor{grid-template-columns:1fr}}
 #edCanvas{display:block;max-width:100%;max-height:70vh;margin:0 auto;cursor:crosshair;background:#000;border-radius:8px}
 .slider{display:grid;grid-template-columns:44px 1fr 44px;gap:6px;align-items:center;font-size:13px}.slider input{padding:0;accent-color:var(--accent)}
+.meter{height:8px;background:var(--line);border-radius:5px;overflow:hidden;margin:4px 0}.meter>i{display:block;height:100%;background:var(--ok)}
+.meter.warn>i{background:var(--warn)}.meter.bad>i{background:var(--bad)}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}.chips button{padding:3px 10px;font-size:13px}
+.vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
+.vitem{border:1px solid var(--line);border-radius:8px;overflow:hidden;font-size:12px;background:var(--bg)}
+.vitem img,.vitem video{display:block;width:100%;aspect-ratio:9/16;object-fit:cover;background:#000}
+.vitem .meta{padding:6px}.vitem button{width:100%;border-radius:0;padding:6px;font-size:13px}
+.keyrow{display:grid;grid-template-columns:120px 1fr;gap:8px;align-items:center;margin:6px 0}.keyrow input,.keyrow select{width:100%}
 .pill{display:inline-block;padding:2px 8px;border-radius:99px;border:1px solid var(--line);font-size:12px}
 a{color:var(--accent)}
 </style>
@@ -84,6 +92,21 @@ a{color:var(--accent)}
         <div class="gallery" id="gallery"></div>
       </section>
 
+      <section class="card" id="stockCard" hidden>
+        <h2 style="margin-bottom:4px">보조 영상 <span class="muted">무료 스톡 · 블로그 사진이 기본, 보조 장면에만 사용</span></h2>
+        <div class="row">
+          <select id="stProv"><option value="pexels">Pexels (API)</option><option value="pixabay">Pixabay (API)</option><option value="mixkit">Mixkit (직접 받기)</option></select>
+          <input id="stQuery" placeholder="예: 욕실, 누수, 배관" style="flex:1;min-width:140px">
+          <button id="stSearch">검색</button>
+        </div>
+        <div class="chips" id="stChips"></div>
+        <div id="stInfo" class="muted"></div>
+        <div class="vgrid" id="stResults" style="margin-top:8px"></div>
+        <h2 style="margin:16px 0 6px;font-size:15px">이 영상에 추가한 보조 영상 <span class="muted" id="stCount"></span></h2>
+        <div class="vgrid" id="stLib"></div>
+        <p class="muted" style="margin:8px 0 0">추가한 영상은 아래 대본의 장면별 '보조 영상'에서 고르거나, 영상 만들기의 자동 사용을 켜면 사진이 부족한 설명 장면에만 들어갑니다. 출처는 영상 폴더의 credits.txt와 output/stock_log.jsonl에 기록됩니다.</p>
+      </section>
+
       <section class="card" id="scriptCard" hidden>
         <div class="row" style="justify-content:space-between"><h2 style="margin:0">대본·장면 <span id="mode" class="pill"></span></h2>
           <div class="row"><button class="ghost" id="saveScript">수정 저장</button><button class="ghost" id="aiBtn">AI로 다시 쓰기(유료)</button></div></div>
@@ -101,18 +124,26 @@ a{color:var(--accent)}
     <div>
       <section class="card" id="renderCard" hidden>
         <h2>영상 만들기</h2>
-        <label class="muted">음성(모두 무료)</label>
-        <select id="tts" style="width:100%;margin-bottom:10px">
-          <option value="auto">자동: Edge 무료 음성 → 실패 시 오프라인 음성</option>
-          <option value="edge">Edge 무료 음성(인터넷 필요, 고품질)</option>
-          <option value="local">오프라인 음성(PC 내장, 인터넷 불필요)</option>
+        <div class="row" style="justify-content:space-between"><label class="muted">음성 엔진</label><button class="ghost" id="keysBtn" style="padding:3px 10px;font-size:12px">⚙ API 키 설정</button></div>
+        <select id="tts" style="width:100%;margin:4px 0 10px">
+          <option value="auto">자동: Edge 무료 음성 → 실패 시 PC 내장 음성</option>
+          <option value="edge">Edge 무료 음성 (키 불필요)</option>
+          <option value="azure">Azure 음성 (F0 무료: 월 50만 자)</option>
+          <option value="local">PC 내장 음성 (오프라인)</option>
         </select>
+        <label class="muted">목소리</label>
+        <select id="voiceSel" style="width:100%;margin:4px 0 4px"></select>
+        <p class="muted" id="voiceInfo" style="margin:0 0 8px"></p>
+        <div id="azureMeter" hidden style="margin-bottom:10px"><div class="muted" id="azureMeterText"></div><div class="meter" id="azureMeterBar"><i></i></div></div>
         <label class="muted">음성 배속</label>
         <div class="speed"><span class="muted">느리게</span><input id="speed" type="range" min="0.7" max="1.6" step="0.05" value="1.1"><span class="muted">빠르게</span><b id="speedVal">1.10x</b></div>
         <div class="presets" id="presets"></div>
-        <div class="row" style="margin-bottom:10px"><button class="ghost" id="previewBtn" style="flex:1">▶ 미리 듣기 (첫 문장)</button></div>
+        <label class="muted">음량</label>
+        <div class="speed"><span class="muted">작게</span><input id="volume" type="range" min="0.5" max="1.5" step="0.05" value="1"><span class="muted">크게</span><b id="volumeVal">100%</b></div>
+        <div class="row" style="margin-bottom:10px"><button class="ghost" id="previewBtn" style="flex:1">▶ 미리 듣기 (첫 문장)</button><button class="ghost" id="saveVoiceBtn">기본으로 저장</button></div>
         <audio id="previewAudio" controls hidden style="width:100%;margin-bottom:10px"></audio>
         <p id="previewInfo" class="muted" style="margin:-4px 0 10px"></p>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:4px 0 10px;cursor:pointer"><input type="checkbox" id="autoStock" style="margin-top:3px;flex:none"><span>사진이 부족한 설명 장면에 보조 영상 자동 사용<br><span class="muted">추가한 보조 영상만 사용 · 블로그 사진 우선</span></span></label>
         <button id="renderBtn" style="width:100%">영상 만들기</button>
         <div id="result" style="margin-top:14px"></div>
       </section>
@@ -120,7 +151,7 @@ a{color:var(--accent)}
       <section class="card">
         <h2>이번 영상 비용</h2>
         <div class="grid" id="usage"><div class="stat"><b>0원</b><span class="muted">AI 사용 없음</span></div></div>
-        <p class="muted">기본값은 AI 없이 무료로 동작합니다. 유료 AI는 예상 비용 확인과 승인 후에만 호출됩니다.</p>
+        <p class="muted">기본값은 무료로만 동작합니다. 유료 AI·Azure S0(유료) 음성은 예상 비용을 보여 주고 승인한 경우에만 사용합니다. 스톡 영상은 무료 소스만 지원합니다.</p>
       </section>
     </div>
   </div>
@@ -145,6 +176,20 @@ a{color:var(--accent)}
   </div>
 </div></div>
 
+<div class="modal" id="keysModal" hidden><div class="box" style="width:min(640px,100%)">
+  <div class="row" style="justify-content:space-between;margin-bottom:8px"><h2 style="margin:0">API 키 설정</h2><button class="ghost" id="keysClose">닫기</button></div>
+  <p class="muted" style="margin-top:0">모두 무료로 발급됩니다. 키는 이 PC의 <b>settings.local.json</b>에만 저장되고 GitHub에는 올라가지 않습니다. 빈칸은 기존 값을 유지합니다.</p>
+  <h2 style="font-size:15px;margin:12px 0 4px">Azure Speech (선택)</h2>
+  <p class="muted" style="margin:0 0 6px">Azure Portal에서 Speech 리소스를 <b>가격 책정 계층 F0(무료)</b>로 만들면 월 50만 자까지 무료입니다. F0는 한도를 넘으면 요청이 거절될 뿐 과금되지 않습니다. S0는 첫 글자부터 과금됩니다.</p>
+  <div class="keyrow"><span>키 (KEY 1)</span><input id="kAzKey" type="password" placeholder="입력하면 저장"></div>
+  <div class="keyrow"><span>지역 (Region)</span><input id="kAzRegion" placeholder="예: koreacentral"></div>
+  <div class="keyrow"><span>가격 계층</span><select id="kAzTier"><option value="F0">F0 (무료)</option><option value="S0">S0 (유료 · 사용 전 승인)</option></select></div>
+  <h2 style="font-size:15px;margin:14px 0 4px">무료 스톡 영상 (선택)</h2>
+  <div class="keyrow"><span>Pexels 키</span><input id="kPexels" type="password" placeholder="pexels.com/api 에서 무료 발급"></div>
+  <div class="keyrow"><span>Pixabay 키</span><input id="kPixabay" type="password" placeholder="pixabay.com/api/docs 에서 무료 발급"></div>
+  <div class="row" style="justify-content:flex-end;margin-top:12px"><span class="muted" id="keysMsg" style="flex:1"></span><button id="keysSave">저장</button></div>
+</div></div>
+
 <div class="modal" id="pkModal" hidden><div class="box">
   <div class="row" style="justify-content:space-between;margin-bottom:6px"><h2 style="margin:0" id="pkTitle">장면 사진 고르기</h2>
     <div class="row"><button class="ghost" id="pkClear">모두 해제</button><button id="pkDone">완료</button></div></div>
@@ -162,7 +207,7 @@ async function api(path, body) {
   let r;
   try { r = await fetch(path, body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}); }
   catch (e) { throw new Error('앱 서버에 연결할 수 없습니다.\n\n검은 창(run_windows)이 닫혔거나 멈췄을 수 있습니다. 검은 창을 확인하고, 꺼져 있으면 run_windows를 다시 실행하세요.'); }
-  const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j;
+  const j = await r.json(); if (!r.ok) { const err = new Error(j.error || r.statusText); err.info = j.need_approval; throw err; } return j;
 }
 async function loadRecent() {
   try { const s = await api('/api/status');
@@ -171,6 +216,7 @@ async function loadRecent() {
       $('#hookSel').innerHTML = Object.entries(s.hook_styles).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
       syncHookBar();
     }
+    if (s.voice_default && !applyVoiceDefault.done) applyVoiceDefault(s.voice_default);
     if (!s.ffmpeg) $('#recent').innerHTML = '<span class="bad">FFmpeg를 찾지 못했습니다. README의 설치 방법을 확인하세요.</span>';
     else $('#recent').innerHTML = s.jobs.length ? '최근 작업: ' + s.jobs.slice(0,6).map(j => `<a href="#${j.id}">${esc(j.title || j.id)}</a> <span class="pill">${STATUS[j.status]||j.status}</span>`).join(' · ') : '';
   } catch (e) {}
@@ -193,13 +239,14 @@ async function poll() {
   if (!$('#url').value) $('#url').value = j.url;
   images = {}; (j.images || []).forEach(im => images[im.index] = im);
   renderGallery();
+  renderLibrary(j.stock_clips || []);
   renderReport(j.report);
   renderUsage(j.usage);
   const busy = ['extracting','ai','rendering'].includes(j.status);
   if (j.script) {
     const key = JSON.stringify(j.script);
     if (key !== lastScriptKey && !busy) { renderScript(j.script); lastScriptKey = key; }
-    $('#scriptCard').hidden = false; $('#renderCard').hidden = false;
+    $('#scriptCard').hidden = false; $('#renderCard').hidden = false; $('#stockCard').hidden = false;
   }
   $('#renderBtn').disabled = busy || !j.script; $('#aiBtn').disabled = busy; $('#saveScript').disabled = busy;
   j_voice = j.voice;
@@ -219,7 +266,7 @@ function renderUsage(u) {
   const s = (v, k) => `<div class="stat"><b>${v}</b><span class="muted">${k}</span></div>`;
   $('#usage').innerHTML = s(u.ai_calls ? `${Math.round(u.krw).toLocaleString()}원` : '0원', u.ai_calls ? `AI $${u.usd}` : 'AI 사용 없음')
     + s((u.input_tokens + u.output_tokens).toLocaleString(), `토큰 (입력 ${u.input_tokens} / 출력 ${u.output_tokens})`)
-    + s(u.ai_calls + '회', 'AI 호출') + s('0원', esc(u.tts || '음성: 무료'));
+    + s(u.ai_calls + '회', 'AI 호출') + ttsUsageStat(u);
 }
 let curScript = null;
 function syncHookBar() {
@@ -231,22 +278,24 @@ function syncHookBar() {
 function renderScript(sc) {
   $('#mode').textContent = sc.mode === 'ai' ? 'AI 대본' : '무료 규칙 기반';
   $('#endHeader').value = sc.end_header;
-  curScript = sc; syncHookBar();
+  curScript = sc; syncHookBar(); fillClipSelects();
   $('#scenes').innerHTML = sc.scenes.map((s, i) => `
-    <div class="scene" data-kind="${s.kind}">
+    <div class="scene" data-kind="${s.kind}" data-role="${esc(s.role || '')}">
       <div><div class="muted">${i + 1}. ${s.kind === 'hook' ? '오프닝' : s.kind === 'cta' ? '엔딩(CTA)' : '본문'}</div>
         <div class="thumbs">${s.images.map(n => images[n] ? `<img src="${images[n].url}" title="사진 ${n} 편집" data-edit="${n}">` : '').join('')}</div></div>
       <div>
         <label>상단 문구</label><input class="lab" value="${esc(s.label)}">
         <label>내레이션(자막)</label><textarea class="nar" rows="2">${esc(s.narration)}</textarea>
         <div class="row"><div style="flex:1"><label>강조 단어(쉼표 구분)</label><input class="hl" value="${esc(s.highlight)}"></div>
+          <div style="flex:1;min-width:150px"><label>보조 영상</label><select class="clipSel" data-cur="${esc(s.clip_id || '')}" ${s.kind==='cta'?'disabled':''} style="width:100%"></select></div>
           <div style="flex:1"><label>사진 번호</label><div class="row" style="flex-wrap:nowrap"><input class="imgs" value="${s.images.join(', ')}" ${s.kind==='cta'?'disabled':''} style="flex:1;min-width:0">${s.kind==='cta'?'':`<button class="ghost" type="button" data-pick="${i}" style="white-space:nowrap">사진 고르기</button>`}</div></div></div>
       </div>
     </div>`).join('');
 }
 function collectScript() {
   return {end_header: $('#endHeader').value, scenes: [...document.querySelectorAll('.scene')].map(el => ({
-    kind: el.dataset.kind, label: el.querySelector('.lab').value, narration: el.querySelector('.nar').value,
+    kind: el.dataset.kind, role: el.dataset.role, clip_id: el.querySelector('.clipSel') ? el.querySelector('.clipSel').value : '',
+    label: el.querySelector('.lab').value, narration: el.querySelector('.nar').value,
     highlight: el.querySelector('.hl').value,
     images: el.querySelector('.imgs').value.split(',').map(x => parseInt(x)).filter(n => !isNaN(n))}))};
 }
@@ -273,27 +322,173 @@ $('#presets').onclick = e => { if (e.target.dataset.v) { $('#speed').value = e.t
 $('#speed').oninput = showSpeed; $('#tts').onchange = showSpeed;
 try { const v = localStorage.getItem('reels_speed'); if (v) $('#speed').value = v; const t = localStorage.getItem('reels_tts'); if (t) $('#tts').value = t; } catch (e) {}
 showSpeed();
+// 승인이 필요한 요청: 예상 비용·한도를 보여 주고 동의한 경우에만 다시 보낸다
+async function withApproval(fn) {
+  try { return await fn(false); }
+  catch (e) {
+    if (!e.info) throw e;
+    if (e.info.level === 'block') { alert(e.message); return null; }
+    if (!confirm(e.message + '\n\n진행할까요?')) return null;
+    return await fn(true);
+  }
+}
+const ENG = {edge: 'Edge 무료 음성', local: 'PC 내장 음성', azure: 'Azure 음성'};
 $('#previewBtn').onclick = async () => {
   const first = document.querySelector('.scene .nar');
+  const text = first ? first.value : '안녕하세요. 블로그 릴스 메이커 음성 미리 듣기입니다.';
   const btn = $('#previewBtn'); btn.disabled = true; btn.textContent = '음성 만드는 중…';
   try {
-    const r = await api(`/api/jobs/${jobId}/preview`, {text: first ? first.value : '', tts_engine: $('#tts').value, tts_speed: speedVal()});
-    const a = $('#previewAudio'); a.hidden = false; a.src = r.url + '?t=' + Date.now(); a.play();
-    $('#previewInfo').textContent = `${speedVal().toFixed(2)}x · ${r.seconds}초 · ${r.engine === 'edge' ? 'Edge 무료 음성' : '오프라인 음성'}`;
+    const r = await withApproval(ok => api(jobId ? `/api/jobs/${jobId}/preview` : '/api/preview_voice', {text, ...voiceOpts(), approved: ok}));
+    if (r) {
+      const a = $('#previewAudio'); a.hidden = false; a.src = r.url + '?t=' + Date.now(); a.play();
+      const vname = $('#voiceSel').selectedOptions[0] ? $('#voiceSel').selectedOptions[0].textContent : '';
+      $('#previewInfo').textContent = `${vname} · ${speedVal().toFixed(2)}x · 음량 ${Math.round(volVal() * 100)}% · ${r.seconds}초 · ${ENG[r.engine] || r.engine}${r.chars ? ` · ${r.chars}자 사용` : ''}`;
+      loadUsage();
+    }
   } catch (e) { alert(e.message); }
   btn.disabled = false; btn.textContent = '▶ 미리 듣기 (첫 문장)';
 };
 $('#renderBtn').onclick = async () => {
-  try { await api(`/api/jobs/${jobId}/script`, collectScript()); await api(`/api/jobs/${jobId}/render`, {tts_engine: $('#tts').value, tts_speed: speedVal()}); $('#result').innerHTML=''; open(jobId); }
-  catch (e) { alert(e.message); }
+  try {
+    await api(`/api/jobs/${jobId}/script`, collectScript());
+    const r = await withApproval(ok => api(`/api/jobs/${jobId}/render`, {tts_engine: $('#tts').value, tts_speed: speedVal(),
+      voice: $('#voiceSel').value, volume: volVal(), auto_stock: $('#autoStock').checked, approved: ok}));
+    if (r) { $('#result').innerHTML = ''; open(jobId); }
+  } catch (e) { alert(e.message); }
 };
 function renderResult(r) {
   if ($('#result').dataset.v === r.video_url + r.seconds) return; $('#result').dataset.v = r.video_url + r.seconds;
   $('#result').innerHTML = `<video controls src="${r.video_url}?t=${Date.now()}"></video>
-    <p><a href="${r.video_url}" download>MP4 내려받기</a> · <a href="${r.srt_url}" download>자막(SRT)</a></p>
+    <p><a href="${r.video_url}" download>MP4 내려받기</a> · <a href="${r.srt_url}" download>자막(SRT)</a>${r.credits_url ? ` · <a href="${r.credits_url}" target="_blank">보조 영상 출처</a>` : ''}</p>
     <p class="muted">${r.seconds}초 · 음성 ${(j_voice && j_voice.speed) ? j_voice.speed + 'x · ' : ''}1080×1920 · 30fps · H.264 · 사진 ${r.images_used}/${r.images_total}장<br>저장 위치: ${esc(r.video)}</p>
     ${r.warnings.map(w => `<p class="warn">주의: ${esc(w)}</p>`).join('')}`;
 }
+// ---- 음성 선택·음량·기본값·사용량 ----
+const volVal = () => parseFloat($('#volume').value);
+const voiceOpts = () => ({engine: $('#tts').value, voice: $('#voiceSel').value, speed: speedVal(), volume: volVal()});
+let voiceWanted = null;
+let voiceSeq = 0;
+async function loadVoices() {
+  const eng = $('#tts').value === 'auto' ? 'edge' : $('#tts').value, seq = ++voiceSeq;
+  $('#voiceSel').innerHTML = '<option>불러오는 중…</option>'; $('#azureMeter').hidden = $('#tts').value !== 'azure';
+  try {
+    const r = await api('/api/voices?engine=' + eng);
+    if (seq !== voiceSeq) return;  // 그 사이 엔진을 바꿨으면 늦게 온 응답은 무시
+    const groups = {};
+    r.voices.forEach(v => (groups[v.gender_ko] = groups[v.gender_ko] || []).push(v));
+    $('#voiceSel').innerHTML = Object.entries(groups).map(([g, vs]) => `<optgroup label="${g}">` +
+      vs.map(v => `<option value="${esc(v.name)}">${g} · ${esc(v.label)}${v.type ? ' (' + esc(v.type) + ')' : ''}</option>`).join('') + '</optgroup>').join('');
+    const want = voiceWanted || (() => { try { return localStorage.getItem('reels_voice'); } catch (e) { return null; } })();
+    if (want && [...$('#voiceSel').options].some(o => o.value === want)) $('#voiceSel').value = want;
+    $('#voiceInfo').textContent = r.error ? r.error + ' (기본 목록 표시)' : `${r.voices.length}개 한국어 음성 · ${eng === 'azure' ? 'Azure API에서 조회' : eng === 'edge' ? 'Edge 음성 목록에서 조회' : 'PC 내장'}`;
+    $('#voiceInfo').className = r.error ? 'warn' : 'muted';
+  } catch (e) { if (seq === voiceSeq) $('#voiceInfo').textContent = e.message; }
+}
+$('#tts').addEventListener('change', () => { voiceWanted = null; loadVoices(); loadUsage(); });
+$('#voiceSel').onchange = () => { voiceWanted = $('#voiceSel').value; try { localStorage.setItem('reels_voice', voiceWanted); } catch (e) {} };
+$('#volume').oninput = () => { $('#volumeVal').textContent = Math.round(volVal() * 100) + '%'; try { localStorage.setItem('reels_volume', volVal()); } catch (e) {} };
+try { const v = localStorage.getItem('reels_volume'); if (v) $('#volume').value = v; } catch (e) {}
+$('#volumeVal').textContent = Math.round(volVal() * 100) + '%';
+$('#saveVoiceBtn').onclick = async () => {
+  try { await api('/api/settings/voice', voiceOpts()); alert('이 음성·배속·음량을 기본값으로 저장했습니다.'); } catch (e) { alert(e.message); }
+};
+function applyVoiceDefault(d) {
+  applyVoiceDefault.done = true;
+  const has = k => { try { return localStorage.getItem(k) !== null; } catch (e) { return false; } };
+  if (!has('reels_tts') && d.engine) $('#tts').value = d.engine;
+  if (!has('reels_speed') && d.speed) { $('#speed').value = d.speed; showSpeed(); }
+  if (!has('reels_volume') && d.volume) { $('#volume').value = d.volume; $('#volumeVal').textContent = Math.round(d.volume * 100) + '%'; }
+  if (!has('reels_voice') && d.voice) voiceWanted = d.voice;
+  loadVoices();
+}
+async function loadUsage() {
+  try {
+    const u = await api('/api/usage'); const pct = Math.min(100, u.azure_free / u.azure_limit * 100);
+    $('#azureMeterText').textContent = `이번 달(${u.month}) Azure 사용: 무료 ${u.azure_free.toLocaleString()} / ${u.azure_limit.toLocaleString()}자 (${pct.toFixed(1)}%)` +
+      (u.azure_billable ? ` · 과금 대상 ${u.azure_billable.toLocaleString()}자` : '') + ` · 계층 ${u.azure_tier}` + (u.azure_ready ? '' : ' · 키 미설정');
+    $('#azureMeterBar').className = 'meter' + (pct >= 100 ? ' bad' : pct >= 80 ? ' warn' : '');
+    $('#azureMeterBar').firstElementChild.style.width = pct + '%';
+  } catch (e) {}
+}
+function ttsUsageStat(u) {
+  const b = u.tts_breakdown || {}; const free = (b.edge || 0) + (b.local || 0) + (b.azure_free || 0); const bill = b.azure_billable || 0;
+  return `<div class="stat"><b class="${bill ? 'warn' : ''}">${bill ? '과금 ' + bill.toLocaleString() + '자' : '0원'}</b><span class="muted">음성: 무료 처리 ${free.toLocaleString()}자${bill ? ` · 과금 대상 ${bill.toLocaleString()}자` : ''}${u.tts ? ' · ' + esc(u.tts) : ''}</span></div>`;
+}
+// ---- API 키 설정 ----
+$('#keysBtn').onclick = async () => {
+  try { const s = await api('/api/status'); $('#kAzRegion').value = s.azure_region || ''; $('#kAzTier').value = s.azure_tier || 'F0';
+    $('#keysMsg').textContent = `현재: Azure ${s.azure_ready ? '설정됨' : '없음'} · Pexels ${s.stock_ready.pexels ? '설정됨' : '없음'} · Pixabay ${s.stock_ready.pixabay ? '설정됨' : '없음'}`; } catch (e) {}
+  $('#keysModal').hidden = false;
+};
+$('#keysClose').onclick = () => { $('#keysModal').hidden = true; };
+$('#keysSave').onclick = async () => {
+  try {
+    await api('/api/settings/keys', {azure_key: $('#kAzKey').value, azure_region: $('#kAzRegion').value, azure_tier: $('#kAzTier').value,
+      pexels_key: $('#kPexels').value, pixabay_key: $('#kPixabay').value});
+    ['#kAzKey', '#kPexels', '#kPixabay'].forEach(id => $(id).value = '');
+    $('#keysModal').hidden = true; loadVoices(); loadUsage();
+  } catch (e) { $('#keysMsg').textContent = e.message; }
+};
+
+// ---- 무료 스톡 보조 영상 ----
+const ST_KW = ['집수리', '욕실', '누수', '배관', '타일', '방수', '곰팡이', '볼라드', '공사', '도배'];
+$('#stChips').innerHTML = ST_KW.map(k => `<button class="ghost" data-kw="${k}">${k}</button>`).join('');
+$('#stChips').onclick = e => { const b = e.target.closest('[data-kw]'); if (b) { $('#stQuery').value = b.dataset.kw; $('#stSearch').click(); } };
+$('#stQuery').onkeydown = e => { if (e.key === 'Enter') $('#stSearch').click(); };
+let stLast = null;
+const fmtDur = d => d ? `${Math.round(d)}초` : '';
+$('#stSearch').onclick = async () => {
+  const prov = $('#stProv').value, q = $('#stQuery').value.trim(); if (!q) return;
+  $('#stInfo').textContent = '검색 중…'; $('#stResults').innerHTML = '';
+  try {
+    const r = await api(`/api/jobs/${jobId}/stock_search`, {provider: prov, query: q}); stLast = r;
+    if (r.manual) {
+      $('#stInfo').innerHTML = `Mixkit은 공식 API가 없어 앱이 자동으로 받지 않습니다. <a href="${r.open_url}" target="_blank" rel="noopener">Mixkit에서 '${esc(r.query_en)}' 찾기 ↗</a> 후 <b>Free License</b> 영상만 직접 내려받아 아래에 등록하세요. <a href="${r.license.url}" target="_blank" rel="noopener">라이선스</a>`;
+      $('#stResults').innerHTML = `<div style="grid-column:1/-1" class="row">
+        <input type="file" id="mkFile" accept="video/mp4,video/*"><input id="mkUrl" placeholder="Mixkit 영상 페이지 주소 (필수)" style="flex:1;min-width:200px"><input id="mkAuthor" placeholder="작가(선택)" style="width:120px"><button id="mkAdd">등록</button></div>`;
+      $('#mkAdd').onclick = async () => {
+        const f = $('#mkFile').files[0]; if (!f) return alert('파일을 고르세요.');
+        const u = `/api/jobs/${jobId}/stock_import?` + new URLSearchParams({source_url: $('#mkUrl').value.trim(), author: $('#mkAuthor').value.trim(), name: f.name, query: q});
+        try { const r2 = await fetch(u, {method: 'POST', body: f}); const j = await r2.json(); if (!r2.ok) throw new Error(j.error); poll(); $('#stInfo').textContent = '등록했습니다.'; }
+        catch (e) { alert(e.message); }
+      };
+      return;
+    }
+    const credit = prov === 'pexels' ? '<a href="https://www.pexels.com" target="_blank" rel="noopener">Videos provided by Pexels</a>' : '<a href="https://pixabay.com" target="_blank" rel="noopener">Pixabay</a> 제공 영상';
+    $('#stInfo').innerHTML = `'${esc(q)}' → '${esc(r.query_en)}' 검색 결과 ${r.items.length}개 · ${credit} · <a href="${r.license.url}" target="_blank" rel="noopener">${esc(r.license.name)}</a> · ${esc(r.license.note)}` +
+      (r.quota_remaining ? ` · 남은 호출 ${r.quota_remaining}회` : '') + (r.cache === 'hit' ? ' · 저장된 결과(24시간)' : '');
+    $('#stResults').innerHTML = r.items.map((it, i) => `<div class="vitem"><img src="${esc(it.thumb)}" loading="lazy" alt="">
+      <div class="meta">${fmtDur(it.duration)} · ${it.width}×${it.height}<br>${it.author ? `by <a href="${esc(it.author_url)}" target="_blank" rel="noopener">${esc(it.author)}</a>` : ''} <a href="${esc(it.page_url)}" target="_blank" rel="noopener">원본 ↗</a></div>
+      <button data-st="${i}">이 영상 사용</button></div>`).join('') || '<p class="muted">결과가 없습니다. 다른 키워드를 써 보세요.</p>';
+  } catch (e) { $('#stInfo').innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+};
+$('#stResults').addEventListener('click', async e => {
+  const b = e.target.closest('[data-st]'); if (!b || !stLast) return;
+  b.disabled = true; b.textContent = '받는 중…';
+  try { await api(`/api/jobs/${jobId}/stock_add`, {item: stLast.items[+b.dataset.st], query: $('#stQuery').value}); b.textContent = '추가됨 ✓'; poll(); }
+  catch (err) { alert(err.message); b.disabled = false; b.textContent = '이 영상 사용'; }
+});
+let libKey = '', LIB = [];
+function renderLibrary(clips) {
+  const key = clips.map(c => c.clip_id).join('|'); if (key === libKey) return; libKey = key; LIB = clips;
+  $('#stCount').textContent = clips.length ? `${clips.length}개` : '';
+  $('#stLib').innerHTML = clips.map(c => `<div class="vitem"><video src="${c.url}" muted preload="metadata" onmouseenter="this.play()" onmouseleave="this.pause()"></video>
+    <div class="meta"><b>${esc(c.provider)}</b> ${c.author ? '· ' + esc(c.author) : ''}<br><a href="${esc(c.license_url)}" target="_blank" rel="noopener">${esc(c.license)}</a> · <a href="${esc(c.page_url || '#')}" target="_blank" rel="noopener">출처</a><br><span class="muted">${esc(c.downloaded_at)} · ${esc(c.cost)}</span></div>
+    <button class="ghost" data-unclip="${esc(c.clip_id)}">빼기</button></div>`).join('') || '<p class="muted">아직 없습니다. 위에서 검색해 추가하세요.</p>';
+  fillClipSelects();
+}
+$('#stLib').addEventListener('click', async e => {
+  const b = e.target.closest('[data-unclip]'); if (!b) return;
+  try { await api(`/api/jobs/${jobId}/stock_remove`, {clip_id: b.dataset.unclip}); libKey = ''; poll(); } catch (err) { alert(err.message); }
+});
+function fillClipSelects() {
+  document.querySelectorAll('.clipSel').forEach(sel => {
+    const cur = sel.value || sel.dataset.cur || '';
+    sel.innerHTML = '<option value="">없음 (사진 사용)</option>' + LIB.map(c => `<option value="${esc(c.clip_id)}">${esc(c.provider)} · ${esc(c.query || c.source_id)}</option>`).join('');
+    sel.value = LIB.some(c => c.clip_id === cur) ? cur : '';
+  });
+}
+
 // ---- 사진 갤러리 ----
 let galleryKey = '';
 const isEdited = im => { const e = im.edits || {}; return e.rotate || e.flip || e.brightness != 1 || e.contrast != 1 || e.saturation != 1 || (e.focus && (e.focus[0] != .5 || e.focus[1] != .5)); };
@@ -425,7 +620,7 @@ $('#upload').onchange = async e => {
 };
 
 window.onhashchange = () => { const id = location.hash.slice(1); if (id && id !== jobId) open(id); };
-loadRecent(); if (location.hash.length > 1) open(location.hash.slice(1));
+loadRecent(); loadVoices(); loadUsage(); if (location.hash.length > 1) open(location.hash.slice(1));
 </script>
 </body>
 </html>

@@ -57,13 +57,21 @@ def subtitle_chunks(text, size=92, max_w=960):
     lines = _wrap(text.split(), f, max_w * 0.82)  # 레퍼런스처럼 한 줄을 짧게
     chunks = [lines[i:i + 2] for i in range(0, len(lines), 2)]
     # 마지막 조각이 한 단어뿐이면 앞 조각과 합쳐 어색함 줄이기
-    if len(chunks) >= 2 and len(chunks[-1]) == 1 and len(chunks[-1][0]) == 1 and len(chunks[-2]) == 2:
+    if (len(chunks) >= 2 and len(chunks[-1]) == 1 and len(chunks[-1][0]) == 1 and len(chunks[-2]) == 2
+            and f.getlength(" ".join(chunks[-2][1] + chunks[-1][0])) <= max_w):  # 화면 폭을 넘으면 합치지 않음
         chunks[-2][1] = chunks[-2][1] + chunks[-1][0]
         chunks.pop()
     return [[" ".join(l) for l in c] for c in chunks]
 
 
-def _shadowed_text_layer(lines, size, colors_fn, stroke=6, line_gap=1.13):
+def _shadowed_text_layer(lines, size, colors_fn, stroke=6, line_gap=1.13, max_w=W - 40):
+    """여러 줄 텍스트 레이어. 화면 폭을 넘으면 글자 크기를 자동으로 줄인다."""
+    while size > 30 and max(font(size).getlength(l) for l in lines) + stroke * 2 > max_w:
+        size -= 4
+    return _text_layer(lines, size, colors_fn, stroke, line_gap)
+
+
+def _text_layer(lines, size, colors_fn, stroke=6, line_gap=1.13):
     """여러 줄 텍스트를 투명 레이어로 그린다. colors_fn(word)->RGB. 반환: (RGBA 이미지, 줄 높이)."""
     f = font(size)
     lh = int(size * line_gap)
@@ -141,6 +149,31 @@ class Panel:
             frame.paste(crop, (x, y))
 
 
+class ClipPanel:
+    """무료 스톡 영상 보조 장면: 사진 밴드 자리에 영상을 채워 재생(짧으면 반복)."""
+    BH = 1140
+
+    def __init__(self, path):
+        self.y = BAND_CY - self.BH // 2
+        self.size = W * self.BH * 3
+        self.proc = subprocess.Popen(
+            [ffmpeg_exe(), "-v", "error", "-stream_loop", "-1", "-i", str(path), "-an", "-vf",
+             f"scale={W}:{self.BH}:force_original_aspect_ratio=increase,crop={W}:{self.BH},fps={FPS}",
+             "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+        self.last = None
+
+    def draw(self, frame, t):
+        buf = self.proc.stdout.read(self.size)
+        if len(buf) == self.size:
+            self.last = Image.frombytes("RGB", (W, self.BH), buf)
+        if self.last is not None:
+            frame.paste(self.last, (0, self.y))
+
+    def close(self):
+        self.proc.kill()
+        self.proc.wait()
+
+
 def plan_panels(scenes, durs):
     """장면 길이에 맞게 사진을 컷으로 배분. 사진이 많으면 2장씩 묶고, 넘치면 다음 장면으로 넘긴다."""
     carry, last, shown = [], [], set()
@@ -148,6 +181,10 @@ def plan_panels(scenes, durs):
     for s, d in zip(scenes, durs):
         if s["kind"] == "cta":
             plans.append([])
+            continue
+        if (s.get("clip") or {}).get("file"):  # 보조 영상 장면: 이 장면 사진은 다음 장면으로 넘겨 빠지지 않게
+            plans.append([((s["clip"]["file"],), "clip")])
+            carry = list(dict.fromkeys(carry + [im["file"] for im in s.get("images", []) if im.get("file")]))
             continue
         own = [im["file"] for im in s.get("images", []) if im.get("file")]
         if s.get("reused") and carry:
@@ -201,12 +238,13 @@ def render(script, work: Path, settings, log=print, progress=lambda p, m="": Non
     scenes = [s for s in script["scenes"] if s["narration"].strip()]
 
     # 1) 음성
-    voices, engines = [], set()
+    voices, engines, tts_usage = [], set(), {}
     for i, s in enumerate(scenes):
         progress(5 + 25 * i / len(scenes), f"음성 생성 {i + 1}/{len(scenes)}")
         v = tts.synth(s["narration"], work / "tts", settings, log)
         voices.append(v)
         engines.add(v["engine"])
+        tts_usage[v.get("category", v["engine"])] = tts_usage.get(v.get("category", v["engine"]), 0) + v.get("chars", 0)
     durs = [v["seconds"] + GAP_AFTER + (CTA_HOLD if s["kind"] == "cta" else 0) for v, s in zip(voices, scenes)]
     total = sum(durs)
     tempo = 1.0
@@ -324,9 +362,12 @@ def render(script, work: Path, settings, log=print, progress=lambda p, m="": Non
                 pi = min(len(panels) - 1, int(local * len(panels)))
                 key = (si, pi)
                 if key not in panel_cache:
+                    for old in panel_cache.values():
+                        getattr(old, "close", lambda: None)()
                     panel_cache.clear()
                     files, detail = panels[pi]
-                    panel_cache[key] = Panel(files, si * 3 + pi, detail, focus_map)
+                    panel_cache[key] = (ClipPanel(files[0]) if detail == "clip"
+                                        else Panel(files, si * 3 + pi, detail, focus_map))
                 panel_cache[key].draw(frame, local * len(panels) - pi)
             if label_layers[si] is not None:
                 _paste_center(frame, label_layers[si], W / 2, LABEL_Y)
@@ -345,10 +386,14 @@ def render(script, work: Path, settings, log=print, progress=lambda p, m="": Non
     except BrokenPipeError:
         proc.wait()
         raise RuntimeError("ffmpeg가 중간에 종료되었습니다")
+    finally:
+        for old in panel_cache.values():
+            getattr(old, "close", lambda: None)()
 
     progress(100, "완료")
     return {"video": str(out_mp4), "srt": str(work / "subtitles.srt"), "seconds": round(total, 2),
-            "tts_engines": sorted(engines), "images_used": len(shown), "images_total": len(all_imgs),
+            "tts_engines": sorted(engines), "tts_usage": tts_usage,
+            "clips_used": [s["clip"] for s in scenes if (s.get("clip") or {}).get("file")], "images_used": len(shown), "images_total": len(all_imgs),
             "warnings": warnings}
 
 

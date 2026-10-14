@@ -2,6 +2,7 @@
 
 - edge: Microsoft Edge 읽어주기 음성(edge-tts). 무료·API 키 불필요, 인터넷 연결 필요. 품질 가장 좋음.
 - local: 완전 오프라인. Windows는 내장 한국어 음성(System.Speech, PowerShell), 그 외에는 espeak-ng(음질 낮음).
+- azure: Azure AI Speech 공식 API(F0 무료 월 50만 자). voices.py 참고.
 - auto: edge를 먼저 시도하고 실패하면 local.
 같은 문장은 해시로 캐시해서 다시 만들지 않는다.
 """
@@ -12,6 +13,7 @@ import subprocess
 import wave
 from pathlib import Path
 
+from . import voices
 from .config import IS_WINDOWS, ffmpeg_exe
 
 _edge_down = False
@@ -22,18 +24,20 @@ def duration(path) -> float:
         return w.getnframes() / w.getframerate()
 
 
-def _to_wav(src: Path, dst: Path):
+def _to_wav(src: Path, dst: Path, gain: float = 1.0):
+    af = ("silenceremove=start_periods=1:start_threshold=-50dB,areverse,"
+          "silenceremove=start_periods=1:start_threshold=-50dB,areverse")
+    if abs(gain - 1.0) > 1e-3:
+        af += f",volume={gain:.2f}"
     subprocess.run([ffmpeg_exe(), "-v", "error", "-y", "-i", str(src), "-ac", "1", "-ar", "48000",
-                    "-af", "silenceremove=start_periods=1:start_threshold=-50dB,areverse,"
-                           "silenceremove=start_periods=1:start_threshold=-50dB,areverse",
-                    str(dst)], check=True)
+                    "-af", af, str(dst)], check=True)
 
 
-def _edge(text, voice, rate, out_mp3: Path):
+def _edge(text, voice, rate, out_mp3: Path, volume="+0%"):
     import edge_tts
 
     async def run():
-        await edge_tts.Communicate(text, voice, rate=rate).save(str(out_mp3))
+        await edge_tts.Communicate(text, voice, rate=rate, volume=volume).save(str(out_mp3))
     asyncio.run(run())
 
 
@@ -68,27 +72,36 @@ def synth(text: str, out_dir: Path, settings: dict, log=print) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     engine = settings.get("tts_engine", "auto")
     speed = min(1.6, max(0.7, float(settings.get("tts_speed", 1.0))))
-    key = hashlib.sha1(f"{engine}|{settings['tts_voice']}|{speed:.2f}|{text}".encode()).hexdigest()[:16]
+    volume = min(1.5, max(0.5, float(settings.get("tts_volume", 1.0))))
+    voice = settings.get("tts_voice") or "ko-KR-SunHiNeural"
+    key = hashlib.sha1(f"{engine}|{voice}|{speed:.2f}|{volume:.2f}|{text}".encode()).hexdigest()[:16]
     wav = out_dir / f"{key}.wav"
     meta = out_dir / f"{key}.engine"
-    if wav.exists() and meta.exists():
-        return {"file": str(wav), "seconds": duration(wav), "engine": meta.read_text()}
+    if wav.exists() and meta.exists():  # 캐시: 다시 만들지 않으므로 사용량도 늘지 않음
+        return {"file": str(wav), "seconds": duration(wav), "engine": meta.read_text(), "chars": 0, "category": "cache"}
 
     errors = []
-    order = {"auto": ["edge", "local"], "edge": ["edge"], "local": ["local"]}[engine]
+    order = {"auto": ["edge", "local"], "edge": ["edge"], "local": ["local"], "azure": ["azure"]}[engine]
     if engine == "auto" and _edge_down:
         order = ["local"]
     for eng in order:
         raw = out_dir / f"{key}.{eng}.{'mp3' if eng == 'edge' else 'wav'}"
         try:
+            chars = len(text)
+            gain = 1.0
             if eng == "edge":
-                _edge(text, settings["tts_voice"], f"{round((speed - 1) * 100):+d}%", raw)
+                _edge(text, voice, f"{round((speed - 1) * 100):+d}%", raw, f"{round((volume - 1) * 100):+d}%")
+            elif eng == "azure":
+                raw = raw.with_suffix(".wav")
+                chars = voices.azure_synth(text, voice, speed, volume, settings, raw)
             else:
                 _local(text, raw, speed)
-            _to_wav(raw, wav)
+                gain = volume
+            _to_wav(raw, wav, gain)
             raw.unlink(missing_ok=True)
             meta.write_text(eng)
-            return {"file": str(wav), "seconds": duration(wav), "engine": eng}
+            cat = voices.record(eng, chars, settings)
+            return {"file": str(wav), "seconds": duration(wav), "engine": eng, "chars": chars, "category": cat}
         except Exception as e:
             if eng == "edge":
                 _edge_down = True  # 같은 실행 중에는 다시 기다리지 않음(앱 재시작 시 다시 시도)
