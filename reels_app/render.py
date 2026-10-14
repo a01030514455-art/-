@@ -9,6 +9,7 @@
 - 사진은 천천히 확대/이동(켄 번스), 컷 전환
 """
 import re
+import shutil
 import subprocess
 import wave
 from pathlib import Path
@@ -332,7 +333,10 @@ def render(script, work: Path, settings, log=print, progress=lambda p, m="": Non
             label_layers.append(_shadowed_text_layer([s["label"]], 60, lambda w: (255, 255, 255), stroke=4))
 
     # 5) 프레임 → ffmpeg
-    out_mp4 = work / "reel.mp4"
+    out_mp4 = work / "reel_base.mp4"  # 추가 문구 없는 기본 영상(문구는 editing.compose로 따로 합성)
+    frames_dir = work / "frames"
+    shutil.rmtree(frames_dir, ignore_errors=True)
+    frames_dir.mkdir()
     n_frames = int(round(total * FPS))
     bgm = Path(settings.get("bgm", ""))
     cmd = [ffmpeg_exe(), "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS),
@@ -369,6 +373,8 @@ def render(script, work: Path, settings, log=print, progress=lambda p, m="": Non
                     panel_cache[key] = (ClipPanel(files[0]) if detail == "clip"
                                         else Panel(files, si * 3 + pi, detail, focus_map))
                 panel_cache[key].draw(frame, local * len(panels) - pi)
+            if fi % FPS == 0:  # 썸네일·타임라인용: 자막·라벨이 없는 깨끗한 프레임을 1초마다 저장
+                frame.save(frames_dir / f"clean_{fi // FPS:03d}.jpg", quality=88)
             if label_layers[si] is not None:
                 _paste_center(frame, label_layers[si], W / 2, LABEL_Y)
             while ci < len(cues) - 1 and t >= cues[ci].get("end", 0):
@@ -391,7 +397,10 @@ def render(script, work: Path, settings, log=print, progress=lambda p, m="": Non
             getattr(old, "close", lambda: None)()
 
     progress(100, "완료")
-    return {"video": str(out_mp4), "srt": str(work / "subtitles.srt"), "seconds": round(total, 2),
+    timeline = [{"start": round(st, 2), "end": round(st + d, 2), "role": s.get("role", ""), "kind": s["kind"],
+                 "label": s.get("label", "")} for s, st, d in zip(scenes, starts, durs)]
+    return {"video": str(out_mp4), "base_video": str(out_mp4), "timeline": timeline,
+            "srt": str(work / "subtitles.srt"), "seconds": round(total, 2),
             "tts_engines": sorted(engines), "tts_usage": tts_usage,
             "clips_used": [s["clip"] for s in scenes if (s.get("clip") or {}).get("file")], "images_used": len(shown), "images_total": len(all_imgs),
             "warnings": warnings}

@@ -7,7 +7,7 @@
 <style>
 :root{--bg:#f4f5f7;--card:#fff;--ink:#16181d;--sub:#5b6170;--line:#e3e5ea;--accent:#507aff;--ok:#1a9c5b;--bad:#d64545;--warn:#b7791f}
 @media (prefers-color-scheme:dark){:root{--bg:#111214;--card:#1c1d21;--ink:#eceef2;--sub:#9aa0ad;--line:#2c2e34}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif}
+*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif}
 main{max-width:1080px;margin:0 auto;padding:20px 16px 60px}
 h1{font-size:22px;margin:4px 0 16px}h2{font-size:16px;margin:0 0 12px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
@@ -53,6 +53,28 @@ video{display:block;width:100%;max-width:340px;aspect-ratio:9/16;margin:0 auto;b
 .vitem img,.vitem video{display:block;width:100%;aspect-ratio:9/16;object-fit:cover;background:#000}
 .vitem .meta{padding:6px}.vitem button{width:100%;border-radius:0;padding:6px;font-size:13px}
 .keyrow{display:grid;grid-template-columns:120px 1fr;gap:8px;align-items:center;margin:6px 0}.keyrow input,.keyrow select{width:100%}
+.tabs{display:flex;gap:6px;margin-bottom:12px}.tabs button{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.tabs button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.studio{display:grid;grid-template-columns:380px 1fr;gap:18px}.studio>div,.layout>div{min-width:0}@media (max-width:900px){.studio{grid-template-columns:1fr}}
+.stage{position:relative;width:360px;max-width:100%;aspect-ratio:9/16;background:#000;border-radius:12px;overflow:hidden;margin:0 auto;user-select:none}
+.stage video,.stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.ovl{position:absolute;inset:0;pointer-events:none}
+.ov{position:absolute;transform:translate(-50%,-50%);white-space:pre;text-align:center;line-height:1.2;font-weight:800;
+  font-family:"Malgun Gothic","Apple SD Gothic Neo","Nanum Gothic",sans-serif;pointer-events:auto;cursor:move;border-radius:.2em}
+.ov.sel{outline:2px dashed #ffd400;outline-offset:3px}
+.safe{position:absolute;left:0;right:0;background:rgba(255,40,40,.22);border:1px dashed rgba(255,80,80,.9);pointer-events:none;
+  color:#fff;font-size:11px;display:flex;align-items:center;justify-content:center;text-shadow:0 1px 2px #000}
+.safe.side{top:0;bottom:0;left:auto}
+.ovlist{display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto;margin:8px 0}
+.ovitem{display:flex;gap:8px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:6px 8px;cursor:pointer;font-size:13px}
+.ovitem.sel{border-color:var(--accent);background:var(--bg)}.ovitem .t{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.frow{display:grid;grid-template-columns:86px 1fr;gap:6px 10px;align-items:center;margin:4px 0;font-size:13px}.frow input[type=range]{padding:0;accent-color:var(--accent)}
+.strip{display:flex;gap:4px;overflow-x:auto;padding:4px 0 8px}.strip .fr{flex:none;width:54px;cursor:pointer;text-align:center;font-size:11px;color:var(--sub);position:relative}
+.strip img{width:54px;height:96px;object-fit:cover;border-radius:4px;border:2px solid transparent;display:block}
+.strip .fr.sel img{border-color:var(--accent)}.strip .fr .star{position:absolute;top:2px;left:2px;background:#F6C10A;color:#000;font-size:10px;border-radius:4px;padding:0 3px;font-weight:700}
+.recos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.reco{border:2px solid var(--line);border-radius:8px;overflow:hidden;cursor:pointer;font-size:12px}
+.reco.sel{border-color:var(--accent)}.reco img{width:100%;aspect-ratio:9/16;object-fit:cover;display:block}.reco div{padding:4px 6px}
+.outrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.outrow a{display:inline-block;padding:8px 14px;border:1px solid var(--line);border-radius:8px;text-decoration:none;font-weight:600}
 .pill{display:inline-block;padding:2px 8px;border-radius:99px;border:1px solid var(--line);font-size:12px}
 a{color:var(--accent)}
 </style>
@@ -155,6 +177,67 @@ a{color:var(--accent)}
       </section>
     </div>
   </div>
+  <section class="card" id="editCard" hidden>
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0">수동 편집 <span class="muted">문구·썸네일 (AI 재호출 없음 · 무료)</span></h2>
+      <div class="row"><label class="muted">안전 영역</label><select id="safeSel"><option value="reels">인스타 릴스</option><option value="shorts">유튜브 쇼츠</option><option value="">표시 안 함</option></select></div></div>
+    <div class="tabs" style="margin-top:10px"><button class="on" data-tab="text">문구 편집</button><button data-tab="thumb">썸네일</button><button data-tab="final">최종본 미리보기</button></div>
+
+    <div id="tab-text" class="studio">
+      <div>
+        <div class="stage" id="edStage"><video id="edVideo" playsinline preload="metadata"></video><div class="ovl" id="ovLayer"></div><div class="ovl" id="safeLayer"></div></div>
+        <div class="row" style="justify-content:center;margin-top:8px"><button class="ghost" id="edPlay">▶ 재생</button><span class="muted" id="edTime">0.0초</span></div>
+        <input type="range" id="edSeek" min="0" max="60" step="0.1" value="0" style="width:100%;padding:0;accent-color:var(--accent)">
+        <p class="muted" style="margin:4px 0 0">문구를 끌어서 옮길 수 있습니다. 빨간 영역은 앱 화면(메뉴·설명·버튼)에 가려질 수 있는 곳입니다.</p>
+      </div>
+      <div>
+        <div class="row"><button id="ovAdd">+ 문구 추가</button><select id="tplSel" style="flex:1;min-width:140px"></select><button class="ghost" id="tplApply">템플릿으로 추가</button></div>
+        <div class="ovlist" id="ovList"></div>
+        <div id="ovForm" hidden>
+          <div class="frow"><span>문구</span><textarea id="fText" rows="2"></textarea></div>
+          <div class="frow"><span>시작 / 끝(초)</span><div class="row" style="flex-wrap:nowrap"><input type="number" id="fStart" step="0.1" min="0" style="width:80px"><button class="ghost" id="fStartNow" title="현재 재생 위치">현재</button><input type="number" id="fEnd" step="0.1" min="0" style="width:80px"><button class="ghost" id="fEndNow" title="현재 재생 위치">현재</button></div></div>
+          <div class="frow"><span>글자 크기</span><input type="range" id="fSize" min="20" max="200" step="2"></div>
+          <div class="frow"><span>글자 색</span><input type="color" id="fColor"></div>
+          <div class="frow"><span>배경</span><div class="row" style="flex-wrap:nowrap"><label><input type="checkbox" id="fBgOn"> 사용</label><input type="color" id="fBg"><input type="range" id="fBgOp" min="0" max="1" step="0.05" title="배경 불투명도" style="flex:1;padding:0"></div></div>
+          <div class="frow"><span>효과</span><div class="row"><label><input type="checkbox" id="fShadow"> 그림자</label><label><input type="checkbox" id="fStroke"> 외곽선</label></div></div>
+          <div class="frow"><span>가로 위치</span><input type="range" id="fX" min="0" max="1" step="0.005"></div>
+          <div class="frow"><span>세로 위치</span><input type="range" id="fY" min="0" max="1" step="0.005"></div>
+          <p class="warn" id="fWarn" style="margin:4px 0"></p>
+          <div class="row"><button class="ghost" id="ovDel" style="color:var(--bad)">이 문구 삭제</button><button class="ghost" id="tplSave">템플릿으로 저장</button><button class="ghost" id="tplDel">선택한 템플릿 삭제</button></div>
+        </div>
+        <div class="row" style="margin-top:12px"><button id="ovApply" style="flex:1">최종 영상에 적용 (무료 · 문구만 다시 합성)</button></div>
+        <p class="muted" id="ovMsg" style="margin:6px 0 0">왼쪽 미리보기는 고칠 때마다 바로 바뀝니다. '적용'을 누르면 MP4에 합성됩니다(음성·대본은 다시 만들지 않음).</p>
+      </div>
+    </div>
+
+    <div id="tab-thumb" class="studio" hidden>
+      <div>
+        <div class="stage"><canvas id="thCanvas" width="1080" height="1920"></canvas><div class="ovl" id="thSafe"></div></div>
+        <label style="display:flex;gap:6px;justify-content:center;font-size:13px;margin-top:6px"><input type="checkbox" id="thGrid"> 프로필 격자(3:4) 잘림 표시</label>
+      </div>
+      <div>
+        <h2 style="font-size:15px;margin:0 0 6px">자동 추천 후보 <span class="muted">무료 이미지 분석(선명도·대비·채도·장면) · AI API 미사용</span></h2>
+        <div class="recos" id="thRecos"></div>
+        <h2 style="font-size:15px;margin:12px 0 4px">타임라인 <span class="muted" id="thTimeLbl"></span></h2>
+        <div class="strip" id="thStrip"></div>
+        <label style="font-size:13px"><input type="checkbox" id="thFull"> 자막·라벨이 들어간 화면 그대로 쓰기</label>
+        <div class="frow" style="margin-top:10px"><span>썸네일 문구</span><textarea id="tText" rows="2" placeholder="예: 부분 보수로 반나절 완성!"></textarea></div>
+        <div class="frow"><span>글자 크기</span><input type="range" id="tSize" min="40" max="220" step="2" value="120"></div>
+        <div class="frow"><span>글자 색</span><input type="color" id="tColor" value="#ffffff"></div>
+        <div class="frow"><span>배경</span><div class="row" style="flex-wrap:nowrap"><label><input type="checkbox" id="tBgOn"> 사용</label><input type="color" id="tBg" value="#F6C10A"><input type="range" id="tBgOp" min="0" max="1" step="0.05" value="0.9" style="flex:1;padding:0"></div></div>
+        <div class="frow"><span>효과</span><div class="row"><label><input type="checkbox" id="tShadow" checked> 그림자</label><label><input type="checkbox" id="tStroke" checked> 외곽선</label></div></div>
+        <div class="frow"><span>가로 위치</span><input type="range" id="tX" min="0" max="1" step="0.005" value="0.5"></div>
+        <div class="frow"><span>세로 위치</span><input type="range" id="tY" min="0" max="1" step="0.005" value="0.22"></div>
+        <div class="row" style="margin-top:10px"><select id="tFmt"><option value="png">PNG</option><option value="jpg">JPG</option></select><button id="thSave" style="flex:1">썸네일 저장</button></div>
+        <p class="muted" id="thMsg"></p>
+      </div>
+    </div>
+
+    <div id="tab-final" hidden>
+      <div class="studio"><div><video id="finalVideo" controls playsinline style="width:360px;max-width:100%;aspect-ratio:9/16;background:#000;border-radius:12px;display:block;margin:0 auto"></video></div>
+        <div><h2 style="font-size:15px">썸네일 미리보기</h2><img id="thFinal" alt="" style="width:200px;aspect-ratio:9/16;object-fit:cover;border-radius:8px;background:var(--bg)"><p class="muted" id="thFinalMsg">아직 저장한 썸네일이 없습니다.</p></div></div>
+    </div>
+    <div class="outrow" id="outRow"></div>
+  </section>
 </main>
 
 <div class="modal" id="edModal" hidden><div class="box">
@@ -201,7 +284,7 @@ a{color:var(--accent)}
 const $ = s => document.querySelector(s);
 let j_voice = null, jobId = null, timer = null, lastScriptKey = '', images = {};
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const STATUS = {created:'대기', extracting:'추출 중', ready:'대본 준비됨', ai:'AI 작성 중', rendering:'영상 합성 중', done:'완료', error:'실패'};
+const STATUS = {compositing:'문구 합성 중', created:'대기', extracting:'추출 중', ready:'대본 준비됨', ai:'AI 작성 중', rendering:'영상 합성 중', done:'완료', error:'실패'};
 
 async function api(path, body) {
   let r;
@@ -242,7 +325,7 @@ async function poll() {
   renderLibrary(j.stock_clips || []);
   renderReport(j.report);
   renderUsage(j.usage);
-  const busy = ['extracting','ai','rendering'].includes(j.status);
+  const busy = ['extracting','ai','rendering','compositing'].includes(j.status);
   if (j.script) {
     const key = JSON.stringify(j.script);
     if (key !== lastScriptKey && !busy) { renderScript(j.script); lastScriptKey = key; }
@@ -250,7 +333,8 @@ async function poll() {
   }
   $('#renderBtn').disabled = busy || !j.script; $('#aiBtn').disabled = busy; $('#saveScript').disabled = busy;
   j_voice = j.voice;
-  if (j.result && j.status === 'done') renderResult(j.result);
+  if (j.result && j.status === 'done') { renderResult(j.result); initEditor(j); }
+  $('#ovApply').disabled = busy;
   if (!busy && j.status !== 'created') { clearInterval(timer); timer = null; loadRecent(); }
 }
 function renderReport(r) {
@@ -357,7 +441,7 @@ $('#renderBtn').onclick = async () => {
   } catch (e) { alert(e.message); }
 };
 function renderResult(r) {
-  if ($('#result').dataset.v === r.video_url + r.seconds) return; $('#result').dataset.v = r.video_url + r.seconds;
+  if ($('#result').dataset.v === r.video_url + r.seconds + (r.edited_at || '')) return; $('#result').dataset.v = r.video_url + r.seconds + (r.edited_at || '');
   $('#result').innerHTML = `<video controls src="${r.video_url}?t=${Date.now()}"></video>
     <p><a href="${r.video_url}" download>MP4 내려받기</a> · <a href="${r.srt_url}" download>자막(SRT)</a>${r.credits_url ? ` · <a href="${r.credits_url}" target="_blank">보조 영상 출처</a>` : ''}</p>
     <p class="muted">${r.seconds}초 · 음성 ${(j_voice && j_voice.speed) ? j_voice.speed + 'x · ' : ''}1080×1920 · 30fps · H.264 · 사진 ${r.images_used}/${r.images_total}장<br>저장 위치: ${esc(r.video)}</p>
@@ -617,6 +701,245 @@ $('#upload').onchange = async e => {
     catch (err) { alert(`${f.name}: ${err.message}`); }
   }
   galleryKey = ''; renderGallery();
+};
+
+// ================= 수동 편집 =================
+const OV_DEF = {text: '문구를 입력하세요', size: 72, color: '#ffffff', bg: '', bg_opacity: 0.85, shadow: true, stroke: true, x: 0.5, y: 0.3};
+let OV = [], ovSel = null, ZONES = {}, TPL = [], edDur = 60, edKey = '', ovSaveT = null, curJob = null;
+const FONT = '"Malgun Gothic","Apple SD Gothic Neo","Nanum Gothic",sans-serif';
+const hexA = (h, a) => { h = h.replace('#', ''); if (h.length === 3) h = [...h].map(c => c + c).join('');
+  return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${a})`; };
+const edScale = () => $('#edStage').clientWidth / 1080;
+const mctx = document.createElement('canvas').getContext('2d');
+function ovBox(o) {  // 1080×1920 좌표의 상자(서버 text_box와 같은 규칙)
+  mctx.font = `800 ${o.size}px ${FONT}`;
+  const lines = String(o.text).split('\n'), w = Math.max(...lines.map(l => mctx.measureText(l).width), 1);
+  const padx = o.bg ? o.size * .35 : o.size * .1, pady = o.bg ? o.size * .18 : o.size * .05;
+  const bw = w + padx * 2, bh = lines.length * o.size * 1.2 + pady * 2;
+  return {l: o.x * 1080 - bw / 2, r: o.x * 1080 + bw / 2, t: o.y * 1920 - bh / 2, b: o.y * 1920 + bh / 2};
+}
+function safeIssue(o) {
+  const z = ZONES[$('#safeSel').value]; if (!z) return '';
+  const b = ovBox(o), out = [];
+  if (b.t < z.top) out.push('위쪽'); if (b.b > 1920 - z.bottom) out.push('아래쪽');
+  if (b.r > 1080 - z.right) out.push('오른쪽'); if (b.l < z.left) out.push('왼쪽');
+  if (b.l < 0 || b.r > 1080) out.push('화면 밖');
+  return out.length ? `안전 영역 밖(${out.join('·')}): 릴스/쇼츠 화면에서 가려질 수 있습니다.` : '';
+}
+function renderSafe(layer) {
+  const z = ZONES[$('#safeSel').value]; layer.innerHTML = '';
+  if (!z) return;
+  layer.innerHTML = `<div class="safe" style="top:0;height:${z.top / 19.2}%">상단 메뉴 영역</div>
+    <div class="safe" style="bottom:0;height:${z.bottom / 19.2}%">하단 설명·자막 영역</div>
+    <div class="safe side" style="width:${z.right / 10.8}%;right:0;top:${z.top / 19.2}%;bottom:${z.bottom / 19.2}%">버튼</div>`;
+}
+function ovStyle(el, o, sc) {
+  const fs = o.size * sc;
+  Object.assign(el.style, {left: o.x * 100 + '%', top: o.y * 100 + '%', fontSize: fs + 'px', color: o.color,
+    padding: o.bg ? '.18em .35em' : '.05em .1em', background: o.bg ? hexA(o.bg, o.bg_opacity) : 'transparent'});
+  const sh = [];
+  if (o.stroke) { const w = Math.max(1, fs * .06); for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,-1],[1,-1],[-1,1]]) sh.push(`${dx * w}px ${dy * w}px 0 #0a0a0c`); }
+  if (o.shadow) sh.push(`${fs * .05}px ${fs * .05}px ${fs * .12}px rgba(0,0,0,.66)`);
+  el.style.textShadow = sh.join(',');
+  el.textContent = o.text;
+}
+function drawOverlays() {
+  const v = $('#edVideo'), t = v.currentTime, sc = edScale(), layer = $('#ovLayer');
+  layer.innerHTML = '';
+  OV.forEach(o => {
+    const on = t >= o.start && t <= o.end;
+    if (!on && o.id !== ovSel) return;
+    const el = document.createElement('div'); el.className = 'ov' + (o.id === ovSel ? ' sel' : ''); el.dataset.id = o.id;
+    ovStyle(el, o, sc); if (!on) { el.style.opacity = .45; el.title = '지금 시간에는 안 보이는 문구(편집 중이라 흐리게 표시)'; }
+    layer.appendChild(el);
+  });
+  $('#edTime').textContent = `${t.toFixed(1)}초 / ${edDur.toFixed(1)}초`; $('#edSeek').value = t;
+  const o = OV.find(x => x.id === ovSel); $('#fWarn').textContent = o ? safeIssue(o) : '';
+}
+function renderOvList() {
+  $('#ovList').innerHTML = OV.map((o, i) => `<div class="ovitem${o.id === ovSel ? ' sel' : ''}" data-ov="${o.id}">
+    <b>${i + 1}</b><span class="t">${esc(o.text.replace(/\n/g, ' '))}</span><span class="muted">${o.start.toFixed(1)}–${o.end.toFixed(1)}초</span>${safeIssue(o) ? '<span class="warn" title="안전 영역 밖">⚠</span>' : ''}</div>`).join('')
+    || '<p class="muted">아직 추가한 문구가 없습니다. 재생 위치를 정한 뒤 "+ 문구 추가"를 누르세요.</p>';
+  $('#ovForm').hidden = !OV.find(o => o.id === ovSel);
+}
+function fillForm() {
+  const o = OV.find(x => x.id === ovSel); if (!o) return renderOvList();
+  $('#fText').value = o.text; $('#fStart').value = o.start; $('#fEnd').value = o.end; $('#fSize').value = o.size;
+  $('#fColor').value = o.color; $('#fBgOn').checked = !!o.bg; $('#fBg').value = o.bg || '#000000'; $('#fBgOp').value = o.bg_opacity;
+  $('#fShadow').checked = o.shadow; $('#fStroke').checked = o.stroke; $('#fX').value = o.x; $('#fY').value = o.y;
+  renderOvList();
+}
+function readForm() {
+  const o = OV.find(x => x.id === ovSel); if (!o) return;
+  o.text = $('#fText').value; o.size = +$('#fSize').value; o.color = $('#fColor').value;
+  o.bg = $('#fBgOn').checked ? $('#fBg').value : ''; o.bg_opacity = +$('#fBgOp').value;
+  o.shadow = $('#fShadow').checked; o.stroke = $('#fStroke').checked; o.x = +$('#fX').value; o.y = +$('#fY').value;
+  o.start = Math.max(0, Math.min(edDur, +$('#fStart').value || 0)); o.end = Math.max(o.start + 0.1, Math.min(edDur, +$('#fEnd').value || 0));
+  drawOverlays(); renderOvList(); saveOverlaysSoon();
+}
+['#fText', '#fStart', '#fEnd', '#fSize', '#fColor', '#fBgOn', '#fBg', '#fBgOp', '#fShadow', '#fStroke', '#fX', '#fY']
+  .forEach(id => $(id).addEventListener('input', readForm));
+$('#fStartNow').onclick = () => { $('#fStart').value = $('#edVideo').currentTime.toFixed(1); readForm(); };
+$('#fEndNow').onclick = () => { $('#fEnd').value = $('#edVideo').currentTime.toFixed(1); readForm(); };
+function saveOverlaysSoon() {
+  clearTimeout(ovSaveT);
+  ovSaveT = setTimeout(() => api(`/api/jobs/${jobId}/overlays`, {overlays: OV}).then(r => { $('#ovMsg').textContent = '저장됨 · 아직 MP4에는 반영 전입니다. "최종 영상에 적용"을 누르세요.'; }).catch(e => $('#ovMsg').textContent = e.message), 600);
+}
+function newId() { return 'ov' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
+function addOverlay(style) {
+  const t = $('#edVideo').currentTime;
+  const o = {...OV_DEF, ...style, id: newId(), start: +t.toFixed(1), end: +Math.min(edDur, t + 3).toFixed(1)};
+  delete o.name; delete o.builtin; OV.push(o); ovSel = o.id; fillForm(); drawOverlays(); saveOverlaysSoon();
+}
+$('#ovAdd').onclick = () => addOverlay({});
+$('#tplApply').onclick = () => { const t = TPL[+$('#tplSel').value]; if (t) addOverlay(t); };
+$('#ovDel').onclick = () => { OV = OV.filter(o => o.id !== ovSel); ovSel = null; renderOvList(); drawOverlays(); saveOverlaysSoon(); };
+$('#ovList').onclick = e => { const it = e.target.closest('[data-ov]'); if (!it) return; ovSel = it.dataset.ov;
+  const o = OV.find(x => x.id === ovSel); const v = $('#edVideo'); if (o && (v.currentTime < o.start || v.currentTime > o.end)) v.currentTime = o.start + 0.05;
+  fillForm(); drawOverlays(); };
+async function loadTemplates() {
+  const r = await api('/api/templates'); TPL = r.templates; ZONES = r.safe_zones;
+  $('#tplSel').innerHTML = TPL.map((t, i) => `<option value="${i}">${t.builtin ? '' : '★ '}${esc(t.name)}</option>`).join('');
+}
+$('#tplSave').onclick = async () => {
+  const o = OV.find(x => x.id === ovSel); if (!o) return;
+  const name = prompt('템플릿 이름을 입력하세요', o.text.slice(0, 12)); if (!name) return;
+  try { const r = await api('/api/templates', {...o, name}); TPL = r.templates; await loadTemplates(); $('#ovMsg').textContent = `템플릿 '${name}' 저장됨`; } catch (e) { alert(e.message); }
+};
+$('#tplDel').onclick = async () => {
+  const t = TPL[+$('#tplSel').value]; if (!t) return;
+  if (t.builtin) return alert('기본 템플릿은 지울 수 없습니다. 직접 저장한(★) 템플릿만 지울 수 있습니다.');
+  if (!confirm(`템플릿 '${t.name}'을 지울까요?`)) return;
+  await api('/api/templates/delete', {name: t.name}); await loadTemplates();
+};
+// 끌어서 위치 옮기기
+let drag = null;
+$('#ovLayer').addEventListener('pointerdown', e => {
+  const el = e.target.closest('.ov'); if (!el) return;
+  ovSel = el.dataset.id; drag = {el, o: OV.find(x => x.id === ovSel)}; el.setPointerCapture(e.pointerId);
+  document.querySelectorAll('.ov').forEach(x => x.classList.toggle('sel', x === el)); fillForm();
+});
+$('#ovLayer').addEventListener('pointermove', e => {
+  if (!drag) return; const r = $('#edStage').getBoundingClientRect();
+  drag.o.x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)); drag.o.y = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
+  drag.el.style.left = drag.o.x * 100 + '%'; drag.el.style.top = drag.o.y * 100 + '%';
+  $('#fX').value = drag.o.x; $('#fY').value = drag.o.y; $('#fWarn').textContent = safeIssue(drag.o);
+});
+$('#ovLayer').addEventListener('pointerup', () => { if (drag) { drag = null; renderOvList(); saveOverlaysSoon(); } });
+// 재생·탐색
+const edV = $('#edVideo');
+['timeupdate', 'seeked', 'loadedmetadata'].forEach(ev => edV.addEventListener(ev, drawOverlays));
+edV.addEventListener('play', function tick() { drawOverlays(); if (!edV.paused) requestAnimationFrame(tick); });
+$('#edPlay').onclick = () => { edV.paused ? edV.play() : edV.pause(); };
+edV.addEventListener('play', () => $('#edPlay').textContent = '⏸ 멈춤'); edV.addEventListener('pause', () => $('#edPlay').textContent = '▶ 재생');
+$('#edSeek').oninput = e => { edV.currentTime = +e.target.value; };
+window.addEventListener('resize', drawOverlays);
+$('#safeSel').onchange = () => { renderSafe($('#safeLayer')); renderSafe($('#thSafe')); drawThumbGuides(); drawOverlays(); renderOvList(); };
+$('#ovApply').onclick = async () => {
+  try { clearTimeout(ovSaveT); await api(`/api/jobs/${jobId}/apply_overlays`, {overlays: OV}); $('#ovMsg').textContent = '합성 중… (음성·대본은 그대로, 문구만 다시 합성)'; open(jobId); }
+  catch (e) { alert(e.message); }
+};
+// 탭
+document.querySelectorAll('.tabs [data-tab]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.tabs [data-tab]').forEach(x => x.classList.toggle('on', x === b));
+  ['text', 'thumb', 'final'].forEach(t => $('#tab-' + t).hidden = t !== b.dataset.tab);
+  if (b.dataset.tab === 'thumb') loadFrames();
+  if (b.dataset.tab === 'text') drawOverlays();
+});
+async function initEditor(j) {
+  curJob = j; $('#editCard').hidden = false;
+  const key = j.id + j.result.seconds + (j.result.base_url || '');
+  renderOutputs(j);
+  const fv = j.result.video_url + '?t=' + (j.result.edited_at || j.result.seconds);
+  if ($('#finalVideo').dataset.src !== fv) { $('#finalVideo').src = fv; $('#finalVideo').dataset.src = fv; }
+  if (j.thumbnail && j.thumbnail.url) { $('#thFinal').src = j.thumbnail.url + '?v=' + Date.now(); $('#thFinalMsg').textContent = ''; }
+  if (key === edKey) return; edKey = key;
+  if (!TPL.length) await loadTemplates();
+  edDur = j.result.seconds; $('#edSeek').max = edDur;
+  edV.src = j.result.base_url; OV = (j.overlays || []).map(o => ({...o})); ovSel = null;
+  renderSafe($('#safeLayer')); renderSafe($('#thSafe')); renderOvList(); drawOverlays();
+  thLoadedFor = '';
+}
+function renderOutputs(j) {
+  const r = j.result, th = j.thumbnail && j.thumbnail.url;
+  $('#outRow').innerHTML = `<a href="${r.video_url}" download>⬇ 최종 릴스 MP4</a>` +
+    (th ? `<a href="${th}" download>⬇ 썸네일 ${th.endsWith('.jpg') ? 'JPG' : 'PNG'}</a>` : '<span class="muted" style="align-self:center">썸네일은 썸네일 탭에서 저장하면 여기에 생깁니다</span>') +
+    `<a href="${r.srt_url}" download>⬇ 자막 SRT</a>` + (r.credits_url ? `<a href="${r.credits_url}" download>⬇ 보조 영상 출처</a>` : '');
+}
+
+// ---- 썸네일 ----
+let thLoadedFor = '', thTime = 0, thImg = null, thFrames = [];
+async function loadFrames() {
+  if (!jobId || thLoadedFor === edKey) return; thLoadedFor = edKey;
+  $('#thMsg').textContent = '프레임 불러오는 중…';
+  try {
+    const r = await api(`/api/jobs/${jobId}/frames`); thFrames = r.frames; ZONES = r.safe_zones || ZONES;
+    $('#thRecos').innerHTML = r.recommended.map((c, i) => `<div class="reco" data-t="${c.time}"><img src="${c.url}"><div><b>추천 ${i + 1}</b> · ${c.time}초<br>${esc(c.reason)}</div></div>`).join('') || '<p class="muted">추천할 장면이 없습니다.</p>';
+    const rec = new Set(r.recommended.map(c => c.time));
+    $('#thStrip').innerHTML = thFrames.map(f => `<div class="fr" data-t="${f.time}">${rec.has(f.time) ? '<span class="star">★</span>' : ''}<img src="${f.url}" loading="lazy">${f.time}초</div>`).join('');
+    $('#thMsg').textContent = '';
+    const t0 = curJob && curJob.thumbnail ? curJob.thumbnail.time : (r.recommended[0] ? r.recommended[0].time : 0);
+    if (curJob && curJob.thumbnail) loadThumbSpec(curJob.thumbnail);
+    selectThumb(t0);
+  } catch (e) { $('#thMsg').textContent = e.message; thLoadedFor = ''; }
+}
+function loadThumbSpec(s) {
+  $('#tText').value = s.text || ''; if (s.size) $('#tSize').value = s.size; if (s.color) $('#tColor').value = s.color;
+  $('#tBgOn').checked = !!s.bg; if (s.bg) $('#tBg').value = s.bg; if (s.bg_opacity != null) $('#tBgOp').value = s.bg_opacity;
+  $('#tShadow').checked = s.shadow !== false; $('#tStroke').checked = s.stroke !== false;
+  if (s.x != null) $('#tX').value = s.x; if (s.y != null) $('#tY').value = s.y; if (s.format) $('#tFmt').value = s.format;
+  $('#thFull').checked = s.clean === false;
+}
+function selectThumb(t) {
+  thTime = t; $('#thTimeLbl').textContent = `선택: ${t}초`;
+  document.querySelectorAll('#thStrip .fr, #thRecos .reco').forEach(el => el.classList.toggle('sel', +el.dataset.t === t));
+  if ($('#thFull').checked) {  // 자막 포함: 기본 영상에서 해당 시점을 잡아 그림
+    const v = edV; const done = () => { const c = document.createElement('canvas'); c.width = 1080; c.height = 1920;
+      c.getContext('2d').drawImage(v, 0, 0, 1080, 1920); thImg = c; drawThumb(); };
+    v.pause(); v.currentTime = t + 0.01; v.addEventListener('seeked', done, {once: true});
+  } else {
+    const f = thFrames.find(x => x.time === t); if (!f) return;
+    const im = new Image(); im.onload = () => { thImg = im; drawThumb(); }; im.src = f.url;
+  }
+}
+$('#thStrip').onclick = e => { const f = e.target.closest('[data-t]'); if (f) selectThumb(+f.dataset.t); };
+$('#thRecos').onclick = e => { const f = e.target.closest('[data-t]'); if (f) selectThumb(+f.dataset.t); };
+$('#thFull').onchange = () => selectThumb(thTime);
+const thSpec = () => ({time: thTime, clean: !$('#thFull').checked, text: $('#tText').value, size: +$('#tSize').value, color: $('#tColor').value,
+  bg: $('#tBgOn').checked ? $('#tBg').value : '', bg_opacity: +$('#tBgOp').value, shadow: $('#tShadow').checked,
+  stroke: $('#tStroke').checked, x: +$('#tX').value, y: +$('#tY').value, format: $('#tFmt').value});
+function drawThumb() {
+  const c = $('#thCanvas'), x = c.getContext('2d'), s = thSpec();
+  x.clearRect(0, 0, 1080, 1920); if (thImg) x.drawImage(thImg, 0, 0, 1080, 1920);
+  if (s.text.trim()) {
+    x.font = `800 ${s.size}px ${FONT}`; x.textAlign = 'center'; x.textBaseline = 'middle';
+    const lines = s.text.split('\n'), lh = s.size * 1.2, w = Math.max(...lines.map(l => x.measureText(l).width));
+    const padx = s.bg ? s.size * .35 : s.size * .1, pady = s.bg ? s.size * .18 : s.size * .05;
+    const bw = w + padx * 2, bh = lines.length * lh + pady * 2, cx = s.x * 1080, cy = s.y * 1920;
+    if (s.bg) { x.fillStyle = hexA(s.bg, s.bg_opacity); x.beginPath(); x.roundRect(cx - bw / 2, cy - bh / 2, bw, bh, s.size * .2); x.fill(); }
+    lines.forEach((l, i) => {
+      const ly = cy - bh / 2 + pady + lh * i + lh / 2;
+      x.save();
+      if (s.shadow) { x.shadowColor = 'rgba(0,0,0,.66)'; x.shadowBlur = s.size * .12; x.shadowOffsetX = x.shadowOffsetY = s.size * .05; }
+      if (s.stroke) { x.lineJoin = 'round'; x.lineWidth = Math.max(2, s.size * .06) * 2; x.strokeStyle = '#0a0a0c'; x.strokeText(l, cx, ly); x.shadowColor = 'transparent'; }
+      x.fillStyle = s.color; x.fillText(l, cx, ly); x.restore();
+    });
+  }
+  drawThumbGuides();
+}
+function drawThumbGuides() {
+  renderSafe($('#thSafe'));
+  if ($('#thGrid').checked) $('#thSafe').insertAdjacentHTML('beforeend',
+    '<div class="safe" style="top:0;height:12.5%;background:rgba(0,0,0,.55);border-color:#aaa">프로필 격자에서 잘림</div><div class="safe" style="bottom:0;height:12.5%;background:rgba(0,0,0,.55);border-color:#aaa">프로필 격자에서 잘림</div>');
+}
+['#tText', '#tSize', '#tColor', '#tBgOn', '#tBg', '#tBgOp', '#tShadow', '#tStroke', '#tX', '#tY', '#thGrid'].forEach(id => $(id).addEventListener('input', drawThumb));
+$('#thSave').onclick = async () => {
+  try {
+    const r = await api(`/api/jobs/${jobId}/thumbnail`, thSpec());
+    $('#thMsg').innerHTML = `저장했습니다. <a href="${r.url}" download>내려받기</a>`;
+    $('#thFinal').src = r.url; $('#thFinalMsg').textContent = '';
+    if (curJob) { curJob.thumbnail = {...thSpec(), url: r.url.split('?')[0]}; renderOutputs(curJob); }
+  } catch (e) { alert(e.message); }
 };
 
 window.onhashchange = () => { const id = location.hash.slice(1); if (id && id !== jobId) open(id); };

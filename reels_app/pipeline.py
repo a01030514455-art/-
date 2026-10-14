@@ -1,12 +1,14 @@
 """작업(job) 단위 진행 관리: 추출 → 대본 → (선택) AI 대본 → 영상. 상태는 output/<id>/job.json에 저장."""
 import json
+import shutil
+import subprocess
 import threading
 import time
 import traceback
 import uuid
 from pathlib import Path
 
-from . import ai_script, extractor, images, render, script_rules, stock, tts, voices
+from . import ai_script, editing, extractor, images, render, script_rules, stock, tts, voices
 from .config import OUTPUT_DIR, ROOT, load_settings
 
 JOBS: dict = {}
@@ -57,8 +59,11 @@ class Job:
         if self.post:
             s["images"] = [self._image_public(b) for b in self.post["images"]]
         s["stock_clips"] = [dict(c, url=_web(c["file"])) for c in self.state.get("stock_clips", [])]
+        if s.get("thumbnail", {}).get("file"):
+            s["thumbnail"] = dict(s["thumbnail"], url=_web(s["thumbnail"]["file"]))
         if s["result"]:
             s["result"] = dict(s["result"], video_url=_web(s["result"]["video"]), srt_url=_web(s["result"]["srt"]),
+                               base_url=_web(s["result"].get("base_video") or s["result"]["video"]),
                                credits_url=_web(s["result"]["credits"]) if s["result"].get("credits") else "")
         return s
 
@@ -108,6 +113,56 @@ class Job:
         self._save_post()
         self.log(f"내 사진 추가: {index}번")
         return self._image_public(b)
+
+    # ---- 수동 편집: 추가 문구·썸네일 (AI 재호출 없음) ----
+    def _duration(self):
+        return float((self.state.get("result") or {}).get("seconds") or 60)
+
+    def save_overlays(self, overlays):
+        self.state["overlays"] = [editing.clean_overlay(o, self._duration()) for o in overlays][:30]
+        self.save()
+        return self.state["overlays"]
+
+    def start_apply_overlays(self):
+        if not self.state.get("result"):
+            raise RuntimeError("먼저 영상을 만들어야 합니다.")
+        self._run(self._apply_overlays)
+
+    def _apply_overlays(self):
+        self.set(status="compositing", progress=10, message="추가 문구를 영상에 합성 중(무료)")
+        base = self.dir / "reel_base.mp4"
+        if not base.exists():  # 이 기능 전에 만든 영상: 현재 영상을 기본본으로 보관
+            shutil.copyfile(self.dir / "reel.mp4", base)
+            self.state["result"]["base_video"] = str(base)
+        out = editing.compose(base, self.state.get("overlays", []), self.dir / "reel.mp4", self.log)
+        self.state["result"]["video"] = str(out)
+        self.state["result"]["edited_at"] = time.strftime("%H:%M:%S")
+        self.set(status="done", progress=100, message=f"문구 {len(self.state.get('overlays', []))}개 반영 완료")
+
+    def frames(self):
+        if not self.state.get("result"):
+            raise RuntimeError("먼저 영상을 만들어야 합니다.")
+        fdir = self.dir / "frames"
+        if not any(fdir.glob("clean_*.jpg")):  # 예전 영상: 1초마다 프레임만 뽑아 둔다(자막 포함)
+            fdir.mkdir(exist_ok=True)
+            src = self.dir / ("reel_base.mp4" if (self.dir / "reel_base.mp4").exists() else "reel.mp4")
+            subprocess.run([render.ffmpeg_exe(), "-v", "error", "-y", "-i", str(src), "-vf", "fps=1",
+                            "-q:v", "3", "-start_number", "0", str(fdir / "clean_%03d.jpg")], check=True)
+        if "thumb_recos" not in self.state:
+            self.state["thumb_recos"] = editing.recommend(self.dir, self.state["result"].get("timeline", []))
+            self.save()
+        files = sorted(fdir.glob("clean_*.jpg"))
+        return {"frames": [{"time": int(f.stem.split("_")[1]), "url": _web(str(f))} for f in files],
+                "recommended": [dict(r, url=_web(str(fdir / r["url_name"]))) for r in self.state["thumb_recos"]],
+                "duration": self._duration(), "safe_zones": editing.SAFE_ZONES}
+
+    def thumbnail(self, spec):
+        if not self.state.get("result"):
+            raise RuntimeError("먼저 영상을 만들어야 합니다.")
+        out = editing.make_thumbnail(self.dir, spec)
+        self.state["thumbnail"] = dict(spec, file=str(out))
+        self.save()
+        return {"url": f"{_web(str(out))}?v={int(time.time())}", "file": str(out)}
 
     def _attach_clips(self, script, auto_stock):
         """사용자가 고른 보조 영상을 장면에 붙인다. auto_stock이면 사진이 없어 같은 사진을 반복하는
@@ -321,6 +376,11 @@ class Job:
         self.state["usage"]["tts_breakdown"] = tu
         self.state["usage"]["tts_billable_chars"] = billable
         self.state["usage"]["tts_free"] = billable == 0
+        # 추가 문구 합성(AI·음성 재호출 없음). 문구가 없으면 기본 영상을 그대로 최종본으로.
+        self.set(progress=99, message="추가 문구 합성 중")
+        ovs = [editing.clean_overlay(o, res["seconds"]) for o in self.state.get("overlays", [])]
+        res["video"] = str(editing.compose(Path(res["base_video"]), ovs, self.dir / "reel.mp4", self.log))
+        self.state.pop("thumb_recos", None)
         if res["clips_used"]:
             (self.dir / "credits.txt").write_text(stock.credits_text(res["clips_used"]), encoding="utf-8")
             res["credits"] = str(self.dir / "credits.txt")
@@ -402,7 +462,7 @@ def get(jid) -> Job:
         j.state = json.loads((d / "job.json").read_text(encoding="utf-8"))
         if (d / "post.json").exists():
             j.post = json.loads((d / "post.json").read_text(encoding="utf-8"))
-        if j.state["status"] in ("extracting", "rendering", "ai"):
+        if j.state["status"] in ("extracting", "rendering", "ai", "compositing"):
             j.state["status"] = "error"
             j.state["error"] = "앱이 종료되어 작업이 중단되었습니다. 다시 실행해 주세요."
         JOBS[jid] = j

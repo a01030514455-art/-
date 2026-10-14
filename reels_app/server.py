@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import hooks, images, pipeline, stock, voices
+from . import editing, hooks, images, pipeline, stock, voices
 from .config import APP_DIR, IMAGES_DIR, OUTPUT_DIR, ROOT, ffmpeg_exe, load_settings
 
 STATIC = APP_DIR / "static"
@@ -98,6 +98,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "forbidden"}, 403)
             return self._file(p)
         qs = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items()}
+        if path == "/api/templates":
+            return self._json({"templates": editing.load_templates(), "safe_zones": editing.SAFE_ZONES})
         if path == "/api/voices":
             return self._json(voices.list_voices(qs.get("engine", "edge"), load_settings()))
         if path == "/api/usage":
@@ -128,6 +130,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "작업을 찾을 수 없습니다"}, 404)
             if len(parts) == 3:
                 return self._json(job.public())
+            if parts[3] == "frames":
+                try:
+                    return self._json(job.frames())
+                except RuntimeError as e:
+                    return self._json({"error": str(e)}, 409)
             if parts[3] == "ai_estimate":
                 if not job.post:
                     return self._json({"error": "먼저 글을 추출하세요"}, 400)
@@ -160,6 +167,10 @@ class Handler(BaseHTTPRequestHandler):
                 voices.save_local_settings(upd)
                 voices._voice_cache.clear()
                 return self._json({"ok": True, "saved": sorted(upd)})
+            if parts == ["api", "templates"]:
+                return self._json({"templates": editing.save_template(self._body())})
+            if parts == ["api", "templates", "delete"]:
+                return self._json({"templates": editing.delete_template(self._body().get("name", ""))})
             if parts == ["api", "preview_voice"]:
                 body = self._body()
                 return self._json(pipeline.preview(body.get("text") or "", body, OUTPUT_DIR / "voice_preview"))
@@ -200,6 +211,14 @@ class Handler(BaseHTTPRequestHandler):
                                      {"voice": body.get("voice"), "volume": body.get("volume")},
                                      bool(body.get("auto_stock")), bool(body.get("approved")))
                     return self._json({"ok": True})
+                if action == "overlays":
+                    return self._json({"overlays": job.save_overlays(body.get("overlays") or [])})
+                if action == "apply_overlays":
+                    job.save_overlays(body.get("overlays") or job.state.get("overlays", []))
+                    job.start_apply_overlays()
+                    return self._json({"ok": True})
+                if action == "thumbnail":
+                    return self._json(job.thumbnail(body))
                 if action == "stock_search":
                     return self._json(stock.search(body.get("provider", "pexels"), body.get("query", ""), load_settings()))
                 if action == "stock_add":
