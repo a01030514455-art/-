@@ -24,6 +24,7 @@ from reels_app import extractor, pipeline, script_rules  # noqa: E402
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tts", default="local")
+    ap.add_argument("--speed", type=float, default=None)
     a = ap.parse_args()
 
     tmp = Path(tempfile.mkdtemp(prefix="reels_fixture_"))
@@ -67,7 +68,7 @@ def main():
     job = pipeline.Job(url)
     job.post = post
     job.state["script"] = script
-    job._render(a.tts)
+    job._render(a.tts, a.speed)
     r = job.state["result"]
     probe = json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_entries",
                                        "stream=codec_name,width,height,r_frame_rate,pix_fmt:format=duration",

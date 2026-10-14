@@ -34,7 +34,7 @@ DEFAULTS = {
 
     "tts_engine": "auto",                   # auto(edge→local) | edge | local
     "tts_voice": "ko-KR-SunHiNeural",       # ko-KR-InJoonNeural(남성)도 가능
-    "tts_rate": "+8%",
+    "tts_speed": 1.1,                       # 음성 배속(1.0=기본). 앱 화면에서 0.7~1.6배로 조절
 
     # AI 대본은 기본 꺼짐. 사용 시 앱에서 예상 비용을 보여주고 승인을 받는다.
     "ai_model": "claude-haiku-5-5",

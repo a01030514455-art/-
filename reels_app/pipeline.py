@@ -65,6 +65,7 @@ class Job:
         if self.busy:
             raise RuntimeError("이미 진행 중인 작업이 있습니다.")
         self.busy = True
+        self.state["error"] = None
 
         def wrap():
             try:
@@ -127,17 +128,24 @@ class Job:
         self.state["script_edited"] = True
         self.save()
 
-    def start_render(self, tts_engine=None):
-        self._run(lambda: self._render(tts_engine))
+    def start_render(self, tts_engine=None, tts_speed=None):
+        self._run(lambda: self._render(tts_engine, tts_speed))
 
-    def _render(self, tts_engine):
-        settings = load_settings()
-        if tts_engine:
-            settings["tts_engine"] = tts_engine
+    def preview_voice(self, text, tts_engine=None, tts_speed=None):
+        """선택한 배속으로 한 문장만 미리 만들어 들려준다(무료, 결과는 캐시되어 영상 만들 때 재사용)."""
+        if not text.strip():
+            raise RuntimeError("미리 들을 문장이 없습니다.")
+        settings = _voice_settings(tts_engine, tts_speed)
+        v = tts.synth(text.strip()[:200], self.dir / "tts", settings, self.log)
+        return {"url": _web(v["file"]), "seconds": round(v["seconds"], 2), "engine": v["engine"]}
+
+    def _render(self, tts_engine, tts_speed=None):
+        settings = _voice_settings(tts_engine, tts_speed)
+        self.state["voice"] = {"engine": settings["tts_engine"], "speed": settings["tts_speed"]}
         self.set(status="rendering", progress=1, message="음성 길이 확인 중")
         script = self.state["script"]
         # 무료 대본이고 사용자가 고치지 않았다면, 실제 음성 속도로 한 번 보정해 40~60초에 맞춘다(TTS 결과는 캐시됨).
-        if script["mode"] == "rules" and not self.state["script_edited"]:
+        if script["mode"] == "rules" and not self.state["script_edited"] and self.post:
             secs = sum(tts.synth(s["narration"], self.dir / "tts", settings, self.log)["seconds"] + render.GAP_AFTER
                        for s in script["scenes"]) + render.CTA_HOLD
             if not (settings["min_seconds"] + 2 <= secs <= settings["max_seconds"] - 2):
@@ -154,6 +162,15 @@ class Job:
         for w in res["warnings"]:
             self.log("주의: " + w)
         self.set(status="done", progress=100, message=f"완료: {res['seconds']}초 영상")
+
+
+def _voice_settings(tts_engine=None, tts_speed=None):
+    settings = load_settings()
+    if tts_engine:
+        settings["tts_engine"] = tts_engine
+    if tts_speed:
+        settings["tts_speed"] = round(min(1.6, max(0.7, float(tts_speed))), 2)
+    return settings
 
 
 def script_for_ui(script):

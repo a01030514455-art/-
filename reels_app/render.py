@@ -212,8 +212,11 @@ def render(script, work: Path, settings, log=print, progress=lambda p, m="": Non
         total = sum(durs)
         log(f"길이 {total * tempo:.1f}초 → 음성 속도 {tempo:.2f}배로 맞춤")
     warnings = []
+    if tempo > 1.0:
+        warnings.append(f"선택한 배속({settings.get('tts_speed', 1.0)}배)으로는 {settings['max_seconds']}초를 넘어서, "
+                        f"영상 길이를 맞추려고 음성을 {tempo:.2f}배 더 빠르게 했습니다. 대본을 줄이면 선택한 배속 그대로 나옵니다.")
     if total < settings["min_seconds"]:
-        warnings.append(f"영상 길이 {total:.1f}초로 목표({settings['min_seconds']}초)보다 짧습니다. 본문이 짧거나 고른 문장이 적습니다.")
+        warnings.append(f"영상 길이 {total:.1f}초로 목표({settings['min_seconds']}초)보다 짧습니다. 본문이 짧거나 배속이 빠릅니다(배속을 낮추거나 대본을 늘려 보세요).")
     if total > settings["max_seconds"] + 0.5:
         warnings.append(f"영상 길이 {total:.1f}초로 {settings['max_seconds']}초를 넘습니다. 대본을 줄여 주세요.")
 

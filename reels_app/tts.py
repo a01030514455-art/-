@@ -37,7 +37,7 @@ def _edge(text, voice, rate, out_mp3: Path):
     asyncio.run(run())
 
 
-def _local(text, out_raw: Path):
+def _local(text, out_raw: Path, speed=1.0):
     if IS_WINDOWS:
         import pyttsx3
         eng = pyttsx3.init()
@@ -45,14 +45,14 @@ def _local(text, out_raw: Path):
             if "ko" in (v.id + v.name).lower() or "korean" in v.name.lower() or "heami" in v.name.lower():
                 eng.setProperty("voice", v.id)
                 break
-        eng.setProperty("rate", 190)
+        eng.setProperty("rate", int(180 * speed))
         eng.save_to_file(text, str(out_raw))
         eng.runAndWait()
         return
     exe = shutil.which("espeak-ng") or shutil.which("espeak")
     if not exe:
         raise RuntimeError("오프라인 음성 엔진이 없습니다(espeak-ng 설치 필요).")
-    subprocess.run([exe, "-v", "ko", "-s", "185", "-w", str(out_raw), text], check=True)
+    subprocess.run([exe, "-v", "ko", "-s", str(int(170 * speed)), "-w", str(out_raw), text], check=True)
 
 
 def synth(text: str, out_dir: Path, settings: dict, log=print) -> dict:
@@ -60,7 +60,8 @@ def synth(text: str, out_dir: Path, settings: dict, log=print) -> dict:
     global _edge_down
     out_dir.mkdir(parents=True, exist_ok=True)
     engine = settings.get("tts_engine", "auto")
-    key = hashlib.sha1(f"{engine}|{settings['tts_voice']}|{settings['tts_rate']}|{text}".encode()).hexdigest()[:16]
+    speed = min(1.6, max(0.7, float(settings.get("tts_speed", 1.0))))
+    key = hashlib.sha1(f"{engine}|{settings['tts_voice']}|{speed:.2f}|{text}".encode()).hexdigest()[:16]
     wav = out_dir / f"{key}.wav"
     meta = out_dir / f"{key}.engine"
     if wav.exists() and meta.exists():
@@ -74,9 +75,9 @@ def synth(text: str, out_dir: Path, settings: dict, log=print) -> dict:
         raw = out_dir / f"{key}.{eng}.{'mp3' if eng == 'edge' else 'wav'}"
         try:
             if eng == "edge":
-                _edge(text, settings["tts_voice"], settings["tts_rate"], raw)
+                _edge(text, settings["tts_voice"], f"{round((speed - 1) * 100):+d}%", raw)
             else:
-                _local(text, raw)
+                _local(text, raw, speed)
             _to_wav(raw, wav)
             raw.unlink(missing_ok=True)
             meta.write_text(eng)

@@ -74,6 +74,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/status":
             s = load_settings()
             return self._json({"ffmpeg": bool(shutil.which("ffmpeg")), "tts_engine": s["tts_engine"],
+                               "tts_speed": s["tts_speed"],
                                "ai_model": s["ai_model"], "jobs": pipeline.list_jobs()})
         parts = path.strip("/").split("/")
         if len(parts) >= 3 and parts[:2] == ["api", "jobs"]:
@@ -112,8 +113,11 @@ class Handler(BaseHTTPRequestHandler):
                     job.start_ai()
                     return self._json({"ok": True})
                 if action == "render":
-                    job.start_render(body.get("tts_engine"))
+                    job.start_render(body.get("tts_engine"), body.get("tts_speed"))
                     return self._json({"ok": True})
+                if action == "preview":
+                    return self._json(job.preview_voice(body.get("text") or "", body.get("tts_engine"),
+                                                        body.get("tts_speed")))
         except KeyError:
             return self._json({"error": "작업을 찾을 수 없습니다"}, 404)
         except RuntimeError as e:
