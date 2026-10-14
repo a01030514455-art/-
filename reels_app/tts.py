@@ -9,21 +9,21 @@ import asyncio
 import hashlib
 import shutil
 import subprocess
+import wave
 from pathlib import Path
 
-from .config import IS_WINDOWS
+from .config import IS_WINDOWS, ffmpeg_exe
 
 _edge_down = False
 
 
 def duration(path) -> float:
-    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
-                         capture_output=True, text=True, check=True).stdout.strip()
-    return float(out)
+    with wave.open(str(path)) as w:
+        return w.getnframes() / w.getframerate()
 
 
 def _to_wav(src: Path, dst: Path):
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-ac", "1", "-ar", "48000",
+    subprocess.run([ffmpeg_exe(), "-v", "error", "-y", "-i", str(src), "-ac", "1", "-ar", "48000",
                     "-af", "silenceremove=start_periods=1:start_threshold=-50dB,areverse,"
                            "silenceremove=start_periods=1:start_threshold=-50dB,areverse",
                     str(dst)], check=True)

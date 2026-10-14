@@ -86,3 +86,20 @@ def bold_font_path() -> str:
 
 
 IS_WINDOWS = sys.platform == "win32"
+
+_ffmpeg = None
+
+
+def ffmpeg_exe() -> str:
+    """PC에 설치된 FFmpeg가 있으면 쓰고, 없으면 pip 패키지(imageio-ffmpeg)에 들어 있는 FFmpeg를 쓴다(별도 설치 불필요)."""
+    global _ffmpeg
+    if _ffmpeg is None:
+        import shutil
+        _ffmpeg = shutil.which("ffmpeg")
+        if not _ffmpeg:
+            try:
+                import imageio_ffmpeg
+                _ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+            except Exception as e:
+                raise RuntimeError("FFmpeg를 찾지 못했습니다. `pip install imageio-ffmpeg`를 실행하세요.") from e
+    return _ffmpeg

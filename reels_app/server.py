@@ -1,14 +1,13 @@
 """내 PC에서만 열리는 웹앱 서버(파이썬 표준 라이브러리만 사용). 실행: python -m reels_app"""
 import json
 import mimetypes
-import shutil
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from . import pipeline
-from .config import APP_DIR, IMAGES_DIR, OUTPUT_DIR, ROOT, load_settings
+from .config import APP_DIR, IMAGES_DIR, OUTPUT_DIR, ROOT, ffmpeg_exe, load_settings
 
 STATIC = APP_DIR / "static"
 ALLOWED_FILE_ROOTS = [OUTPUT_DIR.resolve(), IMAGES_DIR.resolve()]
@@ -73,7 +72,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(p)
         if path == "/api/status":
             s = load_settings()
-            return self._json({"ffmpeg": bool(shutil.which("ffmpeg")), "tts_engine": s["tts_engine"],
+            try:
+                has_ffmpeg = bool(ffmpeg_exe())
+            except RuntimeError:
+                has_ffmpeg = False
+            return self._json({"ffmpeg": has_ffmpeg, "tts_engine": s["tts_engine"],
                                "tts_speed": s["tts_speed"],
                                "ai_model": s["ai_model"], "jobs": pipeline.list_jobs()})
         parts = path.strip("/").split("/")

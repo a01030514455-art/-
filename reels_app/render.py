@@ -16,7 +16,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from . import tts
-from .config import bold_font_path, theme
+from .config import bold_font_path, ffmpeg_exe, theme
 from .script_rules import speech_len
 
 W, H, FPS = 1080, 1920, 30
@@ -291,7 +291,7 @@ def render(script, work: Path, settings, log=print, progress=lambda p, m="": Non
     out_mp4 = work / "reel.mp4"
     n_frames = int(round(total * FPS))
     bgm = Path(settings.get("bgm", ""))
-    cmd = ["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS),
+    cmd = [ffmpeg_exe(), "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS),
            "-i", "-", "-i", str(narration)]
     norm = "[1:a]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000[n]"  # 쇼츠 권장 음량, 클리핑 방지
     if bgm.is_file():
@@ -340,13 +340,10 @@ def render(script, work: Path, settings, log=print, progress=lambda p, m="": Non
         proc.wait()
         raise RuntimeError("ffmpeg가 중간에 종료되었습니다")
 
-    probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
-                            "stream=codec_name,width,height,r_frame_rate:format=duration", "-of", "json", str(out_mp4)],
-                           capture_output=True, text=True).stdout
     progress(100, "완료")
     return {"video": str(out_mp4), "srt": str(work / "subtitles.srt"), "seconds": round(total, 2),
             "tts_engines": sorted(engines), "images_used": len(shown), "images_total": len(all_imgs),
-            "warnings": warnings, "probe": probe}
+            "warnings": warnings}
 
 
 def _tempo_mix(voices, starts, tempo, out_path, total):
@@ -354,7 +351,7 @@ def _tempo_mix(voices, starts, tempo, out_path, total):
     for v in voices:
         p = Path(v["file"]).with_suffix(f".t{tempo:.2f}.wav")
         if not p.exists():
-            subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", v["file"], "-filter:a", f"atempo={tempo:.4f}",
+            subprocess.run([ffmpeg_exe(), "-v", "error", "-y", "-i", v["file"], "-filter:a", f"atempo={tempo:.4f}",
                             "-ac", "1", "-ar", "48000", str(p)], check=True)
         tmp.append(str(p))
     _concat_wavs(list(zip(tmp, starts)), out_path, total + 0.5)

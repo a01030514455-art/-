@@ -2,6 +2,7 @@
 playwright>=1.48      # 공개 블로그 글 열기 (브라우저 자동화)
 edge-tts>=6.1         # 무료 한국어 AI 음성 (인터넷 연결 필요, API 키 불필요)
 pillow>=10            # 자막/장면 이미지 합성
+imageio-ffmpeg>=0.5   # 영상 인코딩용 FFmpeg를 포함(따로 설치할 필요 없음)
 # 선택
 pyttsx3>=2.90 ; sys_platform == "win32"   # 오프라인 Windows 한국어 음성(Heami) 대체용
 # anthropic>=1.0      # AI 대본 모드를 쓸 때만 설치 (기본값은 무료 규칙 기반)
