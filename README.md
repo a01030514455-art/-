@@ -10,8 +10,9 @@
 
 ### Windows
 1. [Python 3.10 이상](https://www.python.org/downloads/)을 설치합니다. 설치할 때 "Add to PATH"를 체크하세요.
-2. FFmpeg를 설치합니다. PowerShell에서 `winget install --id Gyan.FFmpeg`를 실행하세요.
-3. `run_windows.bat`를 더블클릭하면 브라우저에 `http://127.0.0.1:8765`가 열립니다.
+2. `run_windows.bat`를 더블클릭합니다. FFmpeg가 없으면 자동으로 설치합니다(무료, winget 사용).
+   - "FFmpeg is still not available"이 나오면 창을 닫고 한 번 더 실행하세요. 그래도 안 되면 PC를 재시작하세요.
+3. 준비가 끝나면 브라우저에 `http://127.0.0.1:8765`가 열립니다. 검은 창은 앱을 쓰는 동안 닫지 마세요.
    - 브라우저 자동화는 PC에 기본 설치된 Edge를 씁니다. 추가 다운로드는 없습니다.
 
 ### macOS / Linux

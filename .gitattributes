@@ -1,0 +1,2 @@
+# Windows 배치 파일은 CRLF 그대로 보관(변환 금지)
+*.bat -text
