@@ -116,6 +116,8 @@ class Job:
         self.set(status="ready", progress=100, message="AI 대본 완료")
 
     def update_script(self, ui_script):
+        if not self.post or not self.state.get("script"):
+            raise RuntimeError("먼저 블로그 글을 가져와야 합니다(추출이 끝나지 않았거나 실패한 작업입니다).")
         by_index = {b["index"]: b for b in self.post["images"]}
         scenes = []
         for s in ui_script["scenes"]:
@@ -129,6 +131,8 @@ class Job:
         self.save()
 
     def start_render(self, tts_engine=None, tts_speed=None):
+        if not self.state.get("script"):
+            raise RuntimeError("대본이 없습니다. 먼저 블로그 글을 가져오세요.")
         self._run(lambda: self._render(tts_engine, tts_speed))
 
     def preview_voice(self, text, tts_engine=None, tts_speed=None):

@@ -1,7 +1,7 @@
 """한국어 음성 합성(무료).
 
 - edge: Microsoft Edge 읽어주기 음성(edge-tts). 무료·API 키 불필요, 인터넷 연결 필요. 품질 가장 좋음.
-- local: 완전 오프라인. Windows는 내장 한국어 음성(SAPI, pyttsx3), 그 외에는 espeak-ng(음질 낮음).
+- local: 완전 오프라인. Windows는 내장 한국어 음성(System.Speech, PowerShell), 그 외에는 espeak-ng(음질 낮음).
 - auto: edge를 먼저 시도하고 실패하면 local.
 같은 문장은 해시로 캐시해서 다시 만들지 않는다.
 """
@@ -39,15 +39,22 @@ def _edge(text, voice, rate, out_mp3: Path):
 
 def _local(text, out_raw: Path, speed=1.0):
     if IS_WINDOWS:
-        import pyttsx3
-        eng = pyttsx3.init()
-        for v in eng.getProperty("voices"):
-            if "ko" in (v.id + v.name).lower() or "korean" in v.name.lower() or "heami" in v.name.lower():
-                eng.setProperty("voice", v.id)
-                break
-        eng.setProperty("rate", int(180 * speed))
-        eng.save_to_file(text, str(out_raw))
-        eng.runAndWait()
+        # Windows 내장 음성(System.Speech)을 PowerShell로 호출. 한국어 음성(Heami)이 있으면 그것을 쓴다.
+        txt = out_raw.with_suffix(".txt")
+        txt.write_text(text, encoding="utf-8")
+        rate = max(-10, min(10, round((speed - 1) * 10)))
+        ps = ("Add-Type -AssemblyName System.Speech; "
+              "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+              "$v = $s.GetInstalledVoices() | Where-Object { $_.VoiceInfo.Culture.Name -eq 'ko-KR' } | Select-Object -First 1; "
+              "if ($v) { $s.SelectVoice($v.VoiceInfo.Name) }; "
+              f"$s.Rate = {rate}; "
+              f"$s.SetOutputToWaveFile('{out_raw}'); "
+              f"$s.Speak([IO.File]::ReadAllText('{txt}', [Text.Encoding]::UTF8)); $s.Dispose()")
+        r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
+                           capture_output=True, text=True, timeout=120)
+        txt.unlink(missing_ok=True)
+        if r.returncode != 0 or not out_raw.exists():
+            raise RuntimeError("Windows 내장 음성 실패: " + (r.stderr.strip().splitlines() or ["원인 불명"])[-1])
         return
     exe = shutil.which("espeak-ng") or shutil.which("espeak")
     if not exe:

@@ -103,7 +103,9 @@ const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;
 const STATUS = {created:'대기', extracting:'추출 중', ready:'대본 준비됨', ai:'AI 작성 중', rendering:'영상 합성 중', done:'완료', error:'실패'};
 
 async function api(path, body) {
-  const r = await fetch(path, body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  let r;
+  try { r = await fetch(path, body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}); }
+  catch (e) { throw new Error('앱 서버에 연결할 수 없습니다.\n\n검은 창(run_windows)이 닫혔거나 멈췄을 수 있습니다. 검은 창을 확인하고, 꺼져 있으면 run_windows를 다시 실행하세요.'); }
   const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j;
 }
 async function loadRecent() {

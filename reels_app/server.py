@@ -1,6 +1,8 @@
 """내 PC에서만 열리는 웹앱 서버(파이썬 표준 라이브러리만 사용). 실행: python -m reels_app"""
 import json
 import mimetypes
+import time
+import traceback
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -62,6 +64,31 @@ class Handler(BaseHTTPRequestHandler):
                 remaining -= len(chunk)
 
     def do_GET(self):
+        self._safe(self._get)
+
+    def do_POST(self):
+        self._safe(self._post)
+
+    def _safe(self, fn):
+        """어떤 오류가 나도 연결을 끊지 않고 원인을 화면에 돌려준다(검은 창과 output/app_error.log에도 기록)."""
+        try:
+            fn()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as e:
+            tb = traceback.format_exc()
+            print(tb)
+            try:
+                with open(OUTPUT_DIR / "app_error.log", "a", encoding="utf-8") as f:
+                    f.write(time.strftime("[%Y-%m-%d %H:%M:%S] ") + self.command + " " + self.path + "\n" + tb + "\n")
+            except OSError:
+                pass
+            try:
+                self._json({"error": f"앱 내부 오류: {type(e).__name__}: {e}  (자세한 내용: output/app_error.log)"}, 500)
+            except Exception:
+                pass
+
+    def _get(self):
         path = unquote(urlparse(self.path).path)
         if path in ("/", "/index.html"):
             return self._file(STATIC / "index.html")
@@ -93,7 +120,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(job.ai_estimate())
         return self._json({"error": "not found"}, 404)
 
-    def do_POST(self):
+    def _post(self):
         parts = urlparse(self.path).path.strip("/").split("/")
         try:
             body = self._body()
@@ -105,7 +132,10 @@ class Handler(BaseHTTPRequestHandler):
                 job.start_extract()
                 return self._json({"id": job.id})
             if len(parts) == 4 and parts[:2] == ["api", "jobs"]:
-                job = pipeline.get(parts[2])
+                try:
+                    job = pipeline.get(parts[2])
+                except KeyError:
+                    return self._json({"error": "작업을 찾을 수 없습니다"}, 404)
                 action = parts[3]
                 if action == "script":
                     job.update_script(body)
@@ -121,8 +151,6 @@ class Handler(BaseHTTPRequestHandler):
                 if action == "preview":
                     return self._json(job.preview_voice(body.get("text") or "", body.get("tts_engine"),
                                                         body.get("tts_speed")))
-        except KeyError:
-            return self._json({"error": "작업을 찾을 수 없습니다"}, 404)
         except RuntimeError as e:
             return self._json({"error": str(e)}, 409)
         return self._json({"error": "not found"}, 404)
