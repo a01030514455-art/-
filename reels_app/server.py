@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from . import pipeline
+from . import images, pipeline
 from .config import APP_DIR, IMAGES_DIR, OUTPUT_DIR, ROOT, ffmpeg_exe, load_settings
 
 STATIC = APP_DIR / "static"
@@ -123,6 +123,16 @@ class Handler(BaseHTTPRequestHandler):
     def _post(self):
         parts = urlparse(self.path).path.strip("/").split("/")
         try:
+            if len(parts) == 4 and parts[:2] == ["api", "jobs"] and parts[3] == "upload":
+                n = int(self.headers.get("Content-Length") or 0)
+                if n > images.MAX_UPLOAD:
+                    return self._json({"error": "사진 파일이 너무 큽니다(40MB 이하)."}, 413)
+                data = self.rfile.read(n)
+                try:
+                    job = pipeline.get(parts[2])
+                except KeyError:
+                    return self._json({"error": "작업을 찾을 수 없습니다"}, 404)
+                return self._json(job.add_upload(data))
             body = self._body()
             if parts == ["api", "jobs"]:
                 url = (body.get("url") or "").strip()
@@ -148,6 +158,8 @@ class Handler(BaseHTTPRequestHandler):
                 if action == "render":
                     job.start_render(body.get("tts_engine"), body.get("tts_speed"))
                     return self._json({"ok": True})
+                if action == "image_edit":
+                    return self._json(job.edit_image(body.get("index"), body.get("edits") or {}))
                 if action == "preview":
                     return self._json(job.preview_voice(body.get("text") or "", body.get("tts_engine"),
                                                         body.get("tts_speed")))

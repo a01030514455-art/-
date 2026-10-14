@@ -6,7 +6,7 @@ import traceback
 import uuid
 from pathlib import Path
 
-from . import ai_script, extractor, render, script_rules, tts
+from . import ai_script, extractor, images, render, script_rules, tts
 from .config import OUTPUT_DIR, ROOT, load_settings
 
 JOBS: dict = {}
@@ -55,11 +55,72 @@ class Job:
         if s["script"]:
             s["script"] = script_for_ui(s["script"])
         if self.post:
-            s["images"] = [{"index": b["index"], "url": _web(b["file"]), "caption": b.get("caption", ""),
-                            "w": b.get("w"), "h": b.get("h")} for b in self.post["images"]]
+            s["images"] = [self._image_public(b) for b in self.post["images"]]
         if s["result"]:
             s["result"] = dict(s["result"], video_url=_web(s["result"]["video"]), srt_url=_web(s["result"]["srt"]))
         return s
+
+    # ---- 사진 편집 ----
+    def _image_public(self, b):
+        f = b.get("edited_file") or b["file"]
+        try:
+            ver = int(Path(f).stat().st_mtime)
+        except OSError:
+            ver = 0
+        return {"index": b["index"], "url": f"{_web(f)}?v={ver}", "original_url": _web(b["file"]),
+                "caption": b.get("caption", ""), "w": b.get("w"), "h": b.get("h"),
+                "edits": b.get("edits") or images.DEFAULT_EDITS, "uploaded": bool(b.get("uploaded"))}
+
+    def _save_post(self):
+        (self.dir / "post.json").write_text(json.dumps(self.post, ensure_ascii=False, indent=1), encoding="utf-8")
+
+    def _find_image(self, index):
+        if not self.post:
+            raise RuntimeError("먼저 블로그 글을 가져와야 합니다.")
+        for b in self.post["images"]:
+            if b["index"] == int(index):
+                return b
+        raise RuntimeError(f"사진 {index}번을 찾을 수 없습니다.")
+
+    def edit_image(self, index, edits):
+        b = self._find_image(index)
+        e = images.clean_edits(edits)
+        edited = Path(self.post["image_dir"]) / "edited" / f"{b['index']:03d}.jpg"
+        if images.is_default(e):
+            edited.unlink(missing_ok=True)
+            b.pop("edited_file", None)
+        else:
+            images.apply_edits(b["file"], edited, e)
+            b["edited_file"] = str(edited)
+        b["edits"] = e
+        self._save_post()
+        self.log(f"사진 {b['index']} 편집 저장")
+        return self._image_public(b)
+
+    def add_upload(self, data: bytes):
+        if not self.post:
+            raise RuntimeError("먼저 블로그 글을 가져와야 합니다.")
+        index = max([b["index"] for b in self.post["images"]] or [0]) + 1
+        b = images.save_upload(data, Path(self.post["image_dir"]), index)
+        self.post["images"].append(b)
+        self._save_post()
+        self.log(f"내 사진 추가: {index}번")
+        return self._image_public(b)
+
+    def _resolve_images(self, script):
+        """대본의 사진을 현재 편집 상태(편집본 파일·중심점)로 바꿔 렌더링에 넘긴다."""
+        if not self.post:
+            return script
+        by_index = {b["index"]: b for b in self.post["images"]}
+        scenes = []
+        for s in script["scenes"]:
+            ims = []
+            for im in s.get("images", []):
+                b = by_index.get(im.get("index"), im)
+                ims.append(dict(b, file=b.get("edited_file") or b["file"],
+                                focus=(b.get("edits") or {}).get("focus", [0.5, 0.5])))
+            scenes.append(dict(s, images=ims))
+        return dict(script, scenes=scenes)
 
     def _run(self, fn):
         if self.busy:
@@ -158,7 +219,7 @@ class Job:
                 self.log(f"예상 {secs:.1f}초 → 실제 말하기 속도({cps:.1f}자/초)로 대본 분량 재조정")
                 script = script_rules.build(self.post, settings, chars_per_sec=cps * 0.97)
                 self.state["script"] = script
-        res = render.render(script, self.dir, settings, log=self.log,
+        res = render.render(self._resolve_images(script), self.dir, settings, log=self.log,
                             progress=lambda p, m="": self.set(progress=p, message=m))
         eng = {"edge": "Edge 무료 음성(온라인)", "local": "로컬 무료 음성(오프라인)"}
         self.state["usage"]["tts"] = ", ".join(eng.get(e, e) for e in res["tts_engines"]) + " — 0원"

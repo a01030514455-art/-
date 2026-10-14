@@ -29,6 +29,18 @@ video{display:block;width:100%;max-width:340px;aspect-ratio:9/16;margin:0 auto;b
 .speed{display:flex;align-items:center;gap:10px;margin:2px 0 6px}.speed input{flex:1;accent-color:var(--accent);padding:0}
 .speed b{min-width:52px;text-align:right;font-size:18px}.presets{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
 .presets button{padding:4px 10px;font-size:13px}.presets button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px}
+.ph{position:relative;cursor:pointer;border-radius:8px;overflow:hidden;border:2px solid transparent;background:var(--bg)}
+.ph img{display:block;width:100%;aspect-ratio:1;object-fit:cover}.ph:hover{border-color:var(--accent)}
+.ph .no{position:absolute;left:4px;top:4px;background:rgba(0,0,0,.65);color:#fff;font-size:12px;padding:1px 6px;border-radius:6px}
+.ph .tag{position:absolute;right:4px;bottom:4px;background:var(--accent);color:#fff;font-size:11px;padding:1px 5px;border-radius:5px}
+.ph.sel{border-color:var(--accent)}.ph .ord{position:absolute;right:4px;top:4px;background:var(--accent);color:#fff;font-weight:700;font-size:13px;min-width:22px;text-align:center;border-radius:11px}
+.thumbs img{cursor:pointer}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px;z-index:10}
+.modal[hidden]{display:none}.modal .box{background:var(--card);border-radius:14px;padding:16px;width:min(920px,100%);max-height:94vh;overflow:auto}
+.editor{display:grid;grid-template-columns:1fr 260px;gap:16px}@media (max-width:760px){.editor{grid-template-columns:1fr}}
+#edCanvas{display:block;max-width:100%;max-height:70vh;margin:0 auto;cursor:crosshair;background:#000;border-radius:8px}
+.slider{display:grid;grid-template-columns:44px 1fr 44px;gap:6px;align-items:center;font-size:13px}.slider input{padding:0;accent-color:var(--accent)}
 .pill{display:inline-block;padding:2px 8px;border-radius:99px;border:1px solid var(--line);font-size:12px}
 a{color:var(--accent)}
 </style>
@@ -59,6 +71,13 @@ a{color:var(--accent)}
         <h2>추출 결과</h2>
         <div class="grid" id="stats"></div>
         <div id="errors"></div>
+      </section>
+
+      <section class="card" id="photoCard" hidden>
+        <div class="row" style="justify-content:space-between"><h2 style="margin:0">사진 <span class="muted" id="photoCount"></span></h2>
+          <label class="ghost" style="cursor:pointer;border:1px solid var(--line);border-radius:8px;padding:7px 14px;font-weight:600">+ 내 사진 추가<input id="upload" type="file" accept="image/*" multiple hidden></label></div>
+        <p class="muted" style="margin:6px 0 10px">사진을 누르면 회전·반전·밝기·대비·채도·화면 중심점을 고칠 수 있습니다. 원본은 그대로 보관됩니다.</p>
+        <div class="gallery" id="gallery"></div>
       </section>
 
       <section class="card" id="scriptCard" hidden>
@@ -96,6 +115,32 @@ a{color:var(--accent)}
     </div>
   </div>
 </main>
+
+<div class="modal" id="edModal" hidden><div class="box">
+  <div class="row" style="justify-content:space-between;margin-bottom:10px"><h2 style="margin:0" id="edTitle">사진 편집</h2><button class="ghost" id="edClose">닫기</button></div>
+  <div class="editor">
+    <div><canvas id="edCanvas"></canvas>
+      <p class="muted" style="margin:6px 0 0">사진을 클릭하면 <b>영상에서 보일 중심</b>이 바뀝니다. 밝은 영역이 영상 화면에 보이는 부분(사진 1장일 때)입니다.</p></div>
+    <div>
+      <label class="muted">회전·반전</label>
+      <div class="row" style="margin-bottom:12px"><button class="ghost" id="edRotL" title="왼쪽으로 90도">⟲ 왼쪽</button><button class="ghost" id="edRotR" title="오른쪽으로 90도">⟳ 오른쪽</button><button class="ghost" id="edFlip">↔ 반전</button></div>
+      <label class="muted">보정</label>
+      <div class="slider"><span>밝기</span><input type="range" id="edB" min="0.3" max="2" step="0.05"><span id="edBv"></span></div>
+      <div class="slider"><span>대비</span><input type="range" id="edC" min="0.3" max="2" step="0.05"><span id="edCv"></span></div>
+      <div class="slider"><span>채도</span><input type="range" id="edS" min="0" max="2" step="0.05"><span id="edSv"></span></div>
+      <div class="row" style="margin-top:16px"><button class="ghost" id="edReset">원래대로</button><button id="edSave" style="flex:1">저장</button></div>
+      <p class="muted" id="edMsg"></p>
+    </div>
+  </div>
+</div></div>
+
+<div class="modal" id="pkModal" hidden><div class="box">
+  <div class="row" style="justify-content:space-between;margin-bottom:6px"><h2 style="margin:0" id="pkTitle">장면 사진 고르기</h2>
+    <div class="row"><button class="ghost" id="pkClear">모두 해제</button><button id="pkDone">완료</button></div></div>
+  <p class="muted" style="margin:0 0 10px">누른 순서대로 보여 줍니다. 다시 누르면 빠집니다. 사진이 2장 이상이면 장면 안에서 차례로(많으면 2장씩 나란히) 나옵니다.</p>
+  <div class="gallery" id="pkGrid"></div>
+</div></div>
+
 <script>
 const $ = s => document.querySelector(s);
 let j_voice = null, jobId = null, timer = null, lastScriptKey = '', images = {};
@@ -131,6 +176,7 @@ async function poll() {
   $('#logs').textContent = j.logs.join('\n');
   if (!$('#url').value) $('#url').value = j.url;
   images = {}; (j.images || []).forEach(im => images[im.index] = im);
+  renderGallery();
   renderReport(j.report);
   renderUsage(j.usage);
   const busy = ['extracting','ai','rendering'].includes(j.status);
@@ -165,12 +211,12 @@ function renderScript(sc) {
   $('#scenes').innerHTML = sc.scenes.map((s, i) => `
     <div class="scene" data-kind="${s.kind}">
       <div><div class="muted">${i + 1}. ${s.kind === 'hook' ? '오프닝' : s.kind === 'cta' ? '엔딩(CTA)' : '본문'}</div>
-        <div class="thumbs">${s.images.map(n => images[n] ? `<img src="${images[n].url}" title="사진 ${n}">` : '').join('')}</div></div>
+        <div class="thumbs">${s.images.map(n => images[n] ? `<img src="${images[n].url}" title="사진 ${n} 편집" data-edit="${n}">` : '').join('')}</div></div>
       <div>
         <label>상단 문구</label><input class="lab" value="${esc(s.label)}">
         <label>내레이션(자막)</label><textarea class="nar" rows="2">${esc(s.narration)}</textarea>
         <div class="row"><div style="flex:1"><label>강조 단어(쉼표 구분)</label><input class="hl" value="${esc(s.highlight)}"></div>
-          <div style="flex:1"><label>사진 번호(쉼표 구분)</label><input class="imgs" value="${s.images.join(', ')}" ${s.kind==='cta'?'disabled':''}></div></div>
+          <div style="flex:1"><label>사진 번호</label><div class="row" style="flex-wrap:nowrap"><input class="imgs" value="${s.images.join(', ')}" ${s.kind==='cta'?'disabled':''} style="flex:1;min-width:0">${s.kind==='cta'?'':`<button class="ghost" type="button" data-pick="${i}" style="white-space:nowrap">사진 고르기</button>`}</div></div></div>
       </div>
     </div>`).join('');
 }
@@ -224,6 +270,111 @@ function renderResult(r) {
     <p class="muted">${r.seconds}초 · 음성 ${(j_voice && j_voice.speed) ? j_voice.speed + 'x · ' : ''}1080×1920 · 30fps · H.264 · 사진 ${r.images_used}/${r.images_total}장<br>저장 위치: ${esc(r.video)}</p>
     ${r.warnings.map(w => `<p class="warn">주의: ${esc(w)}</p>`).join('')}`;
 }
+// ---- 사진 갤러리 ----
+let galleryKey = '';
+const isEdited = im => { const e = im.edits || {}; return e.rotate || e.flip || e.brightness != 1 || e.contrast != 1 || e.saturation != 1 || (e.focus && (e.focus[0] != .5 || e.focus[1] != .5)); };
+function renderGallery() {
+  const list = Object.values(images);
+  $('#photoCard').hidden = !list.length;
+  const key = list.map(im => im.url + JSON.stringify(im.edits)).join('|');
+  if (key === galleryKey) return; galleryKey = key;
+  $('#photoCount').textContent = `${list.length}장`;
+  $('#gallery').innerHTML = list.map(im => `<div class="ph" data-edit="${im.index}" title="사진 ${im.index} 편집"><img src="${im.url}" loading="lazy"><span class="no">${im.index}</span>${im.uploaded ? '<span class="tag">추가</span>' : isEdited(im) ? '<span class="tag">편집됨</span>' : ''}</div>`).join('');
+}
+document.addEventListener('click', e => {
+  const ed = e.target.closest('[data-edit]'); if (ed) return openEditor(+ed.dataset.edit);
+  const pk = e.target.closest('[data-pick]'); if (pk) return openPicker(+pk.dataset.pick);
+});
+document.querySelectorAll('.modal').forEach(m => m.addEventListener('click', e => { if (e.target === m) m.hidden = true; }));
+document.addEventListener('keydown', e => { if (e.key === 'Escape') document.querySelectorAll('.modal').forEach(m => m.hidden = true); });
+
+// ---- 사진 편집기 ----
+const DEF = {rotate: 0, flip: false, brightness: 1, contrast: 1, saturation: 1, focus: [0.5, 0.5]};
+let ed = null;
+function openEditor(n) {
+  const im = images[n]; if (!im) return;
+  ed = {index: n, e: JSON.parse(JSON.stringify(im.edits || DEF)), img: new Image()};
+  $('#edTitle').textContent = `사진 ${n} 편집`; $('#edMsg').textContent = '';
+  ed.img.onload = () => { syncSliders(); drawEditor(); };
+  ed.img.src = im.original_url;
+  $('#edModal').hidden = false;
+}
+function syncSliders() {
+  for (const [id, k] of [['edB','brightness'], ['edC','contrast'], ['edS','saturation']]) { $('#' + id).value = ed.e[k]; $('#' + id + 'v').textContent = Math.round(ed.e[k] * 100) + '%'; }
+}
+function drawEditor() {
+  const c = $('#edCanvas'), im = ed.img, e = ed.e, rot = ((e.rotate % 360) + 360) % 360;
+  const sw = rot % 180 ? im.naturalHeight : im.naturalWidth, sh = rot % 180 ? im.naturalWidth : im.naturalHeight;
+  const sc = Math.min(1, 1100 / Math.max(sw, sh));
+  c.width = Math.round(sw * sc); c.height = Math.round(sh * sc);
+  const x = c.getContext('2d');
+  x.save();
+  x.filter = `brightness(${e.brightness}) contrast(${e.contrast}) saturate(${e.saturation})`;
+  x.translate(c.width / 2, c.height / 2); if (e.flip) x.scale(-1, 1); x.rotate(rot * Math.PI / 180);
+  const dw = im.naturalWidth * sc, dh = im.naturalHeight * sc; x.drawImage(im, -dw / 2, -dh / 2, dw, dh);
+  x.restore();
+  // 영상에 보이는 영역(사진 1장일 때, 레이아웃과 같은 비율)
+  const A = 1080 / Math.min(1140, Math.max(760, 1080 * sh / sw));
+  let ww = c.width, wh = c.width / A; if (wh > c.height) { wh = c.height; ww = c.height * A; }
+  const wx = Math.min(Math.max(e.focus[0] * c.width - ww / 2, 0), c.width - ww);
+  const wy = Math.min(Math.max(e.focus[1] * c.height - wh / 2, 0), c.height - wh);
+  x.fillStyle = 'rgba(0,0,0,.55)'; x.beginPath(); x.rect(0, 0, c.width, c.height); x.rect(wx, wy, ww, wh); x.fill('evenodd');
+  x.strokeStyle = '#fff'; x.lineWidth = 3; x.strokeRect(wx, wy, ww, wh);
+  x.beginPath(); x.arc(e.focus[0] * c.width, e.focus[1] * c.height, 12, 0, 7); x.strokeStyle = '#507aff'; x.lineWidth = 5; x.stroke();
+}
+$('#edCanvas').onclick = ev => {
+  const r = ev.target.getBoundingClientRect();
+  ed.e.focus = [+(((ev.clientX - r.left) / r.width).toFixed(3)), +(((ev.clientY - r.top) / r.height).toFixed(3))];
+  drawEditor();
+};
+$('#edRotL').onclick = () => { ed.e.rotate = (ed.e.rotate + 270) % 360; ed.e.focus = [0.5, 0.5]; drawEditor(); };
+$('#edRotR').onclick = () => { ed.e.rotate = (ed.e.rotate + 90) % 360; ed.e.focus = [0.5, 0.5]; drawEditor(); };
+$('#edFlip').onclick = () => { ed.e.flip = !ed.e.flip; ed.e.focus = [1 - ed.e.focus[0], ed.e.focus[1]]; drawEditor(); };
+for (const [id, k] of [['edB','brightness'], ['edC','contrast'], ['edS','saturation']])
+  $('#' + id).oninput = ev => { ed.e[k] = +ev.target.value; syncSliders(); drawEditor(); };
+$('#edReset').onclick = () => { ed.e = JSON.parse(JSON.stringify(DEF)); syncSliders(); drawEditor(); };
+$('#edClose').onclick = () => { $('#edModal').hidden = true; };
+$('#edSave').onclick = async () => {
+  const btn = $('#edSave'); btn.disabled = true; $('#edMsg').textContent = '저장 중…';
+  try {
+    const r = await api(`/api/jobs/${jobId}/image_edit`, {index: ed.index, edits: ed.e});
+    images[r.index] = r; galleryKey = ''; renderGallery();
+    document.querySelectorAll(`.thumbs img[data-edit="${r.index}"]`).forEach(i => i.src = r.url);
+    $('#edModal').hidden = true;
+  } catch (e) { $('#edMsg').textContent = e.message; }
+  btn.disabled = false;
+};
+
+// ---- 장면 사진 고르기 ----
+let pk = null;
+function openPicker(i) {
+  const inp = document.querySelectorAll('.scene')[i].querySelector('.imgs');
+  pk = {inp, sel: inp.value.split(',').map(x => parseInt(x)).filter(n => !isNaN(n) && images[n])};
+  $('#pkTitle').textContent = `${i + 1}번 장면 사진 고르기`; drawPicker(); $('#pkModal').hidden = false;
+}
+function drawPicker() {
+  $('#pkGrid').innerHTML = Object.values(images).map(im => { const o = pk.sel.indexOf(im.index);
+    return `<div class="ph${o >= 0 ? ' sel' : ''}" data-pk="${im.index}"><img src="${im.url}"><span class="no">${im.index}</span>${o >= 0 ? `<span class="ord">${o + 1}</span>` : ''}</div>`; }).join('');
+}
+$('#pkGrid').onclick = e => { const p = e.target.closest('[data-pk]'); if (!p) return; const n = +p.dataset.pk, o = pk.sel.indexOf(n); o >= 0 ? pk.sel.splice(o, 1) : pk.sel.push(n); drawPicker(); };
+$('#pkClear').onclick = () => { pk.sel = []; drawPicker(); };
+$('#pkDone').onclick = () => {
+  pk.inp.value = pk.sel.join(', ');
+  pk.inp.closest('.scene').querySelector('.thumbs').innerHTML = pk.sel.map(n => `<img src="${images[n].url}" title="사진 ${n} 편집" data-edit="${n}">`).join('');
+  $('#pkModal').hidden = true;
+};
+
+// ---- 내 사진 추가 ----
+$('#upload').onchange = async e => {
+  const files = [...e.target.files]; e.target.value = '';
+  for (const f of files) {
+    try { const r = await fetch(`/api/jobs/${jobId}/upload`, {method: 'POST', body: f}); const j = await r.json();
+      if (!r.ok) throw new Error(j.error); images[j.index] = j; }
+    catch (err) { alert(`${f.name}: ${err.message}`); }
+  }
+  galleryKey = ''; renderGallery();
+};
+
 window.onhashchange = () => { const id = location.hash.slice(1); if (id && id !== jobId) open(id); };
 loadRecent(); if (location.hash.length > 1) open(location.hash.slice(1));
 </script>

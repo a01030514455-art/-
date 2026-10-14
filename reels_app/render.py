@@ -13,7 +13,7 @@ import subprocess
 import wave
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 from . import tts
 from .config import bold_font_path, ffmpeg_exe, theme
@@ -95,10 +95,12 @@ def _paste_center(base, layer, cx, cy):
 
 
 # ---------- 사진 ----------
-def _cover(im, bw, bh):
+def _cover(im, bw, bh, focus=(0.5, 0.5)):
+    """칸을 꽉 채우도록 자르되, 사용자가 지정한 중심점(focus, 0~1)이 최대한 가운데 오게 한다."""
     r = max(bw / im.width, bh / im.height)
     im = im.resize((max(bw, round(im.width * r)), max(bh, round(im.height * r))), Image.LANCZOS)
-    x, y = (im.width - bw) // 2, (im.height - bh) // 2
+    x = int(min(max(focus[0] * im.width - bw / 2, 0), im.width - bw))
+    y = int(min(max(focus[1] * im.height - bh / 2, 0), im.height - bh))
     return im.crop((x, y, x + bw, y + bh))
 
 
@@ -106,8 +108,9 @@ class Panel:
     """한 컷(사진 1장 또는 2장). 프레임마다 천천히 확대/이동."""
     OVERSCAN = 1.10
 
-    def __init__(self, files, idx, detail=False):
-        ims = [Image.open(f).convert("RGB") for f in files]
+    def __init__(self, files, idx, detail=False, focus_map=None):
+        ims = [ImageOps.exif_transpose(Image.open(f)).convert("RGB") for f in files]
+        focus = [tuple((focus_map or {}).get(f) or (0.5, 0.5)) for f in files]
         if detail:  # 같은 사진을 이어 쓸 때는 레퍼런스처럼 다른 부분을 확대한 컷으로 바꾼다
             fx, fy = [(0.0, 0.0), (1.0, 1.0), (1.0, 0.0), (0.0, 1.0), (0.5, 0.5)][idx % 5]
             ims = [im.crop((int(im.width * 0.3 * fx), int(im.height * 0.3 * fy),
@@ -122,7 +125,8 @@ class Panel:
             ims = ims[:2]
             bw, bh, gap = (W - 12) // 2, 760, 12
             self.boxes = [(0, BAND_CY - bh // 2, bw, bh), (bw + gap, BAND_CY - bh // 2, bw, bh)]
-        self.src = [_cover(im, int(b[2] * self.OVERSCAN), int(b[3] * self.OVERSCAN)) for im, b in zip(ims, self.boxes)]
+        self.src = [_cover(im, int(b[2] * self.OVERSCAN), int(b[3] * self.OVERSCAN), fc if not detail else (0.5, 0.5))
+                    for im, b, fc in zip(ims, self.boxes, focus)]
 
     def draw(self, frame, t):
         """t: 0~1 컷 내부 진행률."""
@@ -246,6 +250,8 @@ def render(script, work: Path, settings, log=print, progress=lambda p, m="": Non
         f"{i}\n{_srt_time(c['start'])} --> {_srt_time(c['end'])}\n" + "\n".join(c["lines"]) + "\n\n"
         for i, c in enumerate(cues, 1)), encoding="utf-8")
 
+    focus_map = {im["file"]: im.get("focus") for s in scenes for im in s.get("images", []) if im.get("file")}
+
     # 3) 사진 컷 배분
     plans, shown = plan_panels(scenes, durs)
     all_imgs = {im["file"] for s in scenes for im in s.get("images", []) if im.get("file")}
@@ -320,7 +326,7 @@ def render(script, work: Path, settings, log=print, progress=lambda p, m="": Non
                 if key not in panel_cache:
                     panel_cache.clear()
                     files, detail = panels[pi]
-                    panel_cache[key] = Panel(files, si * 3 + pi, detail)
+                    panel_cache[key] = Panel(files, si * 3 + pi, detail, focus_map)
                 panel_cache[key].draw(frame, local * len(panels) - pi)
             if label_layers[si] is not None:
                 _paste_center(frame, label_layers[si], W / 2, LABEL_Y)
