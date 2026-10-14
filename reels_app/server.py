@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import editing, hooks, images, pipeline, stock, voices
-from .config import APP_DIR, IMAGES_DIR, OUTPUT_DIR, ROOT, ffmpeg_exe, load_settings
+from .config import APP_VERSION, APP_DIR, IMAGES_DIR, OUTPUT_DIR, ROOT, ffmpeg_exe, load_settings
 
 STATIC = APP_DIR / "static"
 ALLOWED_FILE_ROOTS = [OUTPUT_DIR.resolve(), IMAGES_DIR.resolve()]
@@ -24,6 +24,7 @@ class Handler(BaseHTTPRequestHandler):
         body = json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -48,6 +49,8 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_response(200)
         self.send_header("Content-Type", ctype + ("; charset=utf-8" if ctype.startswith("text/") else ""))
+        if ctype.startswith("text/html"):
+            self.send_header("Cache-Control", "no-store")  # 업데이트 후 예전 화면이 남지 않게
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Content-Length", str(end - start + 1))
         self.end_headers()
@@ -92,7 +95,13 @@ class Handler(BaseHTTPRequestHandler):
     def _get(self):
         path = unquote(urlparse(self.path).path)
         if path in ("/", "/index.html"):
-            return self._file(STATIC / "index.html")
+            html = (STATIC / "index.html").read_text(encoding="utf-8").replace("{{APP_VERSION}}", APP_VERSION).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")  # 업데이트 후 예전 화면이 남지 않게
+            self.send_header("Content-Length", str(len(html)))
+            self.end_headers()
+            return self.wfile.write(html)
         if path.startswith("/files/"):
             p = (ROOT / path[len("/files/"):]).resolve()
             if not any(p.is_relative_to(r) for r in ALLOWED_FILE_ROOTS):
@@ -251,7 +260,7 @@ def main(open_browser=True):
     IMAGES_DIR.mkdir(exist_ok=True)
     srv = ThreadingHTTPServer((s["host"], s["port"]), Handler)
     url = f"http://{s['host']}:{s['port']}/"
-    print(f"블로그 릴스 메이커 실행 중: {url}  (종료: Ctrl+C)")
+    print(f"Blog Reels Maker {APP_VERSION} running: {url}  (stop: Ctrl+C)")
     if open_browser:
         webbrowser.open(url)
     try:
