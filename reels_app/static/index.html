@@ -75,6 +75,10 @@ video{display:block;width:100%;max-width:340px;aspect-ratio:9/16;margin:0 auto;b
 .recos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.reco{border:2px solid var(--line);border-radius:8px;overflow:hidden;cursor:pointer;font-size:12px}
 .reco.sel{border-color:var(--accent)}.reco img{width:100%;aspect-ratio:9/16;object-fit:cover;display:block}.reco div{padding:4px 6px}
 .outrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.outrow a{display:inline-block;padding:8px 14px;border:1px solid var(--line);border-radius:8px;text-decoration:none;font-weight:600}
+input[type=color]{width:46px;height:34px;padding:2px;border-radius:8px;cursor:pointer;background:var(--card)}
+.swatches{display:inline-flex;gap:4px;flex-wrap:wrap;vertical-align:middle;margin-left:4px}
+.swatches button{width:22px;height:22px;padding:0;border-radius:50%;border:2px solid var(--line)}
+.colorrow{display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px;min-width:0}
 .pill{display:inline-block;padding:2px 8px;border-radius:99px;border:1px solid var(--line);font-size:12px}
 a{color:var(--accent)}
 </style>
@@ -235,9 +239,12 @@ a{color:var(--accent)}
         <h2 style="font-size:15px;margin:12px 0 4px">타임라인 <span class="muted" id="thTimeLbl"></span></h2>
         <div class="strip" id="thStrip"></div>
         <label style="font-size:13px"><input type="checkbox" id="thFull"> 자막·라벨이 들어간 화면 그대로 쓰기</label>
+        <p class="muted" style="margin:2px 0 0;font-size:12px">이 화면 속 자막 색은 '문구 편집' 탭 → 자동 자막(전체) → 글자 색·강조 색에서 바꾸고 '최종 영상에 적용'하면 바뀝니다.</p>
         <div class="frow" style="margin-top:10px"><span>썸네일 문구</span><textarea id="tText" rows="2" placeholder="예: 부분 보수로 반나절 완성!"></textarea></div>
         <div class="frow"><span>글자 크기</span><input type="range" id="tSize" min="40" max="220" step="2" value="120"></div>
         <div class="frow"><span>글자 색</span><input type="color" id="tColor" value="#ffffff"></div>
+        <div class="frow"><span>강조 단어</span><input id="tHl" placeholder="다른 색으로 칠할 단어 (쉼표 구분)"></div>
+        <div class="frow"><span>강조 색</span><input type="color" id="tHlColor" value="#F6C10A"></div>
         <div class="frow"><span>배경</span><div class="row" style="flex-wrap:nowrap"><label><input type="checkbox" id="tBgOn"> 사용</label><input type="color" id="tBg" value="#F6C10A"><input type="range" id="tBgOp" min="0" max="1" step="0.05" value="0.9" style="flex:1;padding:0"></div></div>
         <div class="frow"><span>효과</span><div class="row"><label><input type="checkbox" id="tShadow" checked> 그림자</label><label><input type="checkbox" id="tStroke" checked> 외곽선</label></div></div>
         <div class="frow"><span>가로 위치</span><input type="range" id="tX" min="0" max="1" step="0.005" value="0.5"></div>
@@ -351,7 +358,7 @@ async function poll() {
   }
   $('#renderBtn').disabled = busy || !j.script; $('#aiBtn').disabled = busy; $('#saveScript').disabled = busy;
   j_voice = j.voice;
-  if (j.result && j.status === 'done') { renderResult(j.result); initEditor(j); }
+  if (j.result && !busy && j.status !== 'error') { renderResult(j.result); initEditor(j); }  // 영상이 있으면 대본을 다시 만든 뒤에도 편집 가능
   $('#ovApply').disabled = busy;
   if (!busy && j.status !== 'created') { clearInterval(timer); timer = null; loadRecent(); }
 }
@@ -972,6 +979,7 @@ async function loadFrames() {
 }
 function loadThumbSpec(s) {
   $('#tText').value = s.text || ''; if (s.size) $('#tSize').value = s.size; if (s.color) $('#tColor').value = s.color;
+  $('#tHl').value = (s.hl || []).join(', '); if (s.hl_color) $('#tHlColor').value = s.hl_color;
   $('#tBgOn').checked = !!s.bg; if (s.bg) $('#tBg').value = s.bg; if (s.bg_opacity != null) $('#tBgOp').value = s.bg_opacity;
   $('#tShadow').checked = s.shadow !== false; $('#tStroke').checked = s.stroke !== false;
   if (s.x != null) $('#tX').value = s.x; if (s.y != null) $('#tY').value = s.y; if (s.format) $('#tFmt').value = s.format;
@@ -993,6 +1001,7 @@ $('#thStrip').onclick = e => { const f = e.target.closest('[data-t]'); if (f) se
 $('#thRecos').onclick = e => { const f = e.target.closest('[data-t]'); if (f) selectThumb(+f.dataset.t); };
 $('#thFull').onchange = () => selectThumb(thTime);
 const thSpec = () => ({time: thTime, clean: !$('#thFull').checked, text: $('#tText').value, size: +$('#tSize').value, color: $('#tColor').value,
+  hl: $('#tHl').value.split(',').map(x => x.trim()).filter(Boolean), hl_color: $('#tHlColor').value,
   bg: $('#tBgOn').checked ? $('#tBg').value : '', bg_opacity: +$('#tBgOp').value, shadow: $('#tShadow').checked,
   stroke: $('#tStroke').checked, x: +$('#tX').value, y: +$('#tY').value, format: $('#tFmt').value});
 function drawThumb() {
@@ -1009,7 +1018,11 @@ function drawThumb() {
       x.save();
       if (s.shadow) { x.shadowColor = 'rgba(0,0,0,.66)'; x.shadowBlur = s.size * .12; x.shadowOffsetX = x.shadowOffsetY = s.size * .05; }
       if (s.stroke) { x.lineJoin = 'round'; x.lineWidth = Math.max(2, s.size * .06) * 2; x.strokeStyle = '#0a0a0c'; x.strokeText(l, cx, ly); x.shadowColor = 'transparent'; }
-      x.fillStyle = s.color; x.fillText(l, cx, ly); x.restore();
+      // 단어별 색(강조 단어만 강조 색) — 서버 저장 규칙과 같음
+      x.textAlign = 'left'; let wx = cx - x.measureText(l).width / 2; const words = l.split(' ');
+      words.forEach((w, wi) => { x.fillStyle = s.hl.some(h => w.includes(h)) ? s.hl_color : s.color; x.fillText(w, wx, ly);
+        wx += x.measureText(w + (wi < words.length - 1 ? ' ' : '')).width; });
+      x.textAlign = 'center'; x.restore();
     });
   }
   drawThumbGuides();
@@ -1019,7 +1032,7 @@ function drawThumbGuides() {
   if ($('#thGrid').checked) $('#thSafe').insertAdjacentHTML('beforeend',
     '<div class="safe" style="top:0;height:12.5%;background:rgba(0,0,0,.55);border-color:#aaa">프로필 격자에서 잘림</div><div class="safe" style="bottom:0;height:12.5%;background:rgba(0,0,0,.55);border-color:#aaa">프로필 격자에서 잘림</div>');
 }
-['#tText', '#tSize', '#tColor', '#tBgOn', '#tBg', '#tBgOp', '#tShadow', '#tStroke', '#tX', '#tY', '#thGrid'].forEach(id => $(id).addEventListener('input', drawThumb));
+['#tText', '#tHl', '#tHlColor', '#tSize', '#tColor', '#tBgOn', '#tBg', '#tBgOp', '#tShadow', '#tStroke', '#tX', '#tY', '#thGrid'].forEach(id => $(id).addEventListener('input', drawThumb));
 $('#thSave').onclick = async () => {
   try {
     const r = await api(`/api/jobs/${jobId}/thumbnail`, thSpec());
@@ -1028,6 +1041,18 @@ $('#thSave').onclick = async () => {
     if (curJob) { curJob.thumbnail = {...thSpec(), url: r.url.split('?')[0]}; renderOutputs(curJob); }
   } catch (e) { alert(e.message); }
 };
+
+// ---- 색 선택: 모든 색 칸 옆에 자주 쓰는 색 버튼 ----
+const SWATCH = ['#ffffff', '#111111', '#F6C10A', '#FF3B30', '#507AFF', '#7EF104', '#FF8A00'];
+document.querySelectorAll('input[type=color]').forEach(inp => {
+  const box = document.createElement('span'); box.className = 'swatches';
+  box.innerHTML = SWATCH.map(c => `<button type="button" title="${c}" style="background:${c}" data-c="${c}"></button>`).join('');
+  box.onclick = e => { const b = e.target.closest('[data-c]'); if (!b) return; inp.value = b.dataset.c;
+    inp.dispatchEvent(new Event('input', {bubbles: true})); inp.dispatchEvent(new Event('change', {bubbles: true})); };
+  inp.title = inp.title || '눌러서 색 고르기';
+  const wrap = document.createElement('span'); wrap.className = 'colorrow';  // 색 칸과 색 버튼을 한 줄로
+  inp.parentNode.insertBefore(wrap, inp); wrap.appendChild(inp); wrap.appendChild(box);
+});
 
 window.onhashchange = () => { const id = location.hash.slice(1); if (id && id !== jobId) open(id); };
 loadRecent(); loadVoices(); loadUsage(); if (location.hash.length > 1) open(location.hash.slice(1));

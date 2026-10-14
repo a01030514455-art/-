@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 
 echo ============================================
-echo   Blog Reels Maker v8 - setup and start
+echo   Blog Reels Maker v9 - setup and start
 echo ============================================
 
 rem ---- 1. Python ----
