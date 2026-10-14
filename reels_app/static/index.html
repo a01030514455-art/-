@@ -79,6 +79,9 @@ input[type=color]{width:46px;height:34px;padding:2px;border-radius:8px;cursor:po
 .swatches{display:inline-flex;gap:4px;flex-wrap:wrap;vertical-align:middle;margin-left:4px}
 .swatches button{width:22px;height:22px;padding:0;border-radius:50%;border:2px solid var(--line)}
 .colorrow{display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px;min-width:0}
+.swatches button.mine{border-radius:5px}
+.swatches .swtool{width:auto;min-width:26px;height:24px;border-radius:6px;padding:0 4px;font-size:13px;line-height:1;background:var(--card);color:inherit}
+.swatches .swsep{width:1px;height:18px;background:var(--line);margin:0 2px;align-self:center}
 .pill{display:inline-block;padding:2px 8px;border-radius:99px;border:1px solid var(--line);font-size:12px}
 a{color:var(--accent)}
 </style>
@@ -1042,17 +1045,58 @@ $('#thSave').onclick = async () => {
   } catch (e) { alert(e.message); }
 };
 
-// ---- 색 선택: 모든 색 칸 옆에 자주 쓰는 색 버튼 ----
+// ---- 색 선택: 자주 쓰는 색 + 🔍 화면에서 색 뽑기(스포이드) + 내가 만든 색 저장 ----
 const SWATCH = ['#ffffff', '#111111', '#F6C10A', '#FF3B30', '#507AFF', '#7EF104', '#FF8A00'];
+const MY_COLORS_KEY = 'reels_colors', MY_COLORS_MAX = 10;
+function myColors() {
+  try { const a = JSON.parse(localStorage.getItem(MY_COLORS_KEY) || '[]'); return Array.isArray(a) ? a.filter(c => /^#[0-9a-f]{6}$/i.test(c)) : []; }
+  catch (e) { return []; }
+}
+function setMyColors(a) { try { localStorage.setItem(MY_COLORS_KEY, JSON.stringify(a.slice(0, MY_COLORS_MAX))); } catch (e) {} drawAllSwatches(); }
+function setColor(inp, c) {
+  inp.value = c;
+  inp.dispatchEvent(new Event('input', {bubbles: true})); inp.dispatchEvent(new Event('change', {bubbles: true}));
+}
+const colorBoxes = [];
+function drawSwatches(box) {
+  const mine = myColors();
+  box.innerHTML = SWATCH.map(c => `<button type="button" title="${c}" style="background:${c}" data-c="${c}"></button>`).join('')
+    + (mine.length ? '<span class="swsep"></span>' : '')
+    + mine.map(c => `<button type="button" class="mine" title="내 색 ${c} (우클릭: 지우기)" style="background:${c}" data-c="${c}" data-mine="1"></button>`).join('')
+    + '<button type="button" class="swtool" data-act="pick" title="돋보기: 화면 어디서든 색을 콕 집어 가져오기">🔍</button>'
+    + '<button type="button" class="swtool" data-act="save" title="지금 색을 내 색으로 저장">＋</button>';
+}
+function drawAllSwatches() { colorBoxes.forEach(drawSwatches); }
 document.querySelectorAll('input[type=color]').forEach(inp => {
-  const box = document.createElement('span'); box.className = 'swatches';
-  box.innerHTML = SWATCH.map(c => `<button type="button" title="${c}" style="background:${c}" data-c="${c}"></button>`).join('');
-  box.onclick = e => { const b = e.target.closest('[data-c]'); if (!b) return; inp.value = b.dataset.c;
-    inp.dispatchEvent(new Event('input', {bubbles: true})); inp.dispatchEvent(new Event('change', {bubbles: true})); };
+  const box = document.createElement('span'); box.className = 'swatches'; colorBoxes.push(box); drawSwatches(box);
+  box.onclick = async e => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.c) return setColor(inp, b.dataset.c);
+    if (b.dataset.act === 'save') {
+      const c = inp.value.toLowerCase();
+      return setMyColors([c, ...myColors().filter(x => x.toLowerCase() !== c)]);
+    }
+    if (b.dataset.act === 'pick') {
+      if (!window.EyeDropper) return alert('이 브라우저는 돋보기(스포이드)를 지원하지 않습니다.\n크롬이나 엣지로 열어 주세요.\n(대신 왼쪽 색 칸을 눌러 직접 고를 수 있습니다)');
+      try {
+        const r = await new EyeDropper().open();   // 화면 아무 곳(미리보기·사진·다른 창)이나 클릭하면 그 색을 가져옴. Esc는 취소
+        setColor(inp, r.sRGBHex.startsWith('#') ? r.sRGBHex : rgbToHex(r.sRGBHex));
+      } catch (err) { /* Esc로 취소 */ }
+    }
+  };
+  box.oncontextmenu = e => {   // 내 색 우클릭 → 지우기
+    const b = e.target.closest('[data-mine]'); if (!b) return;
+    e.preventDefault();
+    if (confirm(`내 색 ${b.dataset.c}을(를) 지울까요?`)) setMyColors(myColors().filter(x => x !== b.dataset.c));
+  };
   inp.title = inp.title || '눌러서 색 고르기';
   const wrap = document.createElement('span'); wrap.className = 'colorrow';  // 색 칸과 색 버튼을 한 줄로
   inp.parentNode.insertBefore(wrap, inp); wrap.appendChild(inp); wrap.appendChild(box);
 });
+function rgbToHex(s) {   // 'rgb(1, 2, 3)' → '#010203'
+  const m = (s.match(/\d+/g) || [0, 0, 0]).slice(0, 3);
+  return '#' + m.map(n => (+n).toString(16).padStart(2, '0')).join('');
+}
 
 window.onhashchange = () => { const id = location.hash.slice(1); if (id && id !== jobId) open(id); };
 loadRecent(); loadVoices(); loadUsage(); if (location.hash.length > 1) open(location.hash.slice(1));

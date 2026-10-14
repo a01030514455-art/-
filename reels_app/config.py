@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-APP_VERSION = "v9"  # 화면 제목·검은 창에 표시(새 버전을 받았는지 확인용)
+APP_VERSION = "v10"  # 화면 제목·검은 창에 표시(새 버전을 받았는지 확인용)
 ROOT = Path(__file__).resolve().parent.parent
 APP_DIR = Path(__file__).resolve().parent
 ASSETS = APP_DIR / "assets"
