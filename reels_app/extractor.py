@@ -20,6 +20,7 @@ EXCLUDE_URL_PATTERNS = [
 SKIPPED_COMPONENTS = {
     "se-sticker": "스티커", "se-oglink": "링크 미리보기", "se-map": "지도", "se-placesMap": "지도",
     "se-video": "동영상", "se-oembed": "외부 임베드", "se-file": "첨부파일", "se-material": "자료 카드",
+    "se-table": "표", "se-schedule": "일정", "se-code": "코드", "se-formula": "수식",
 }
 
 ACCESS_DENIED_HINTS = [
@@ -88,7 +89,8 @@ _COLLECT_JS = r"""
       const cls = [...c.classList];
       const skip = cls.find(k => k in SKIP);
       if (skip) { out.skipped.push(SKIP[skip]); continue; }
-      if (cls.includes('se-sectionTitle')) { out.blocks.push({ type: 'heading', text: clean(c.innerText) }); continue; }
+      /* 소제목·인용구 소제목은 본문 낭독에서 제외 */
+      if (cls.includes('se-sectionTitle') || cls.includes('se-quotation')) { out.blocks.push({ type: 'heading', text: clean(c.innerText) }); continue; }
       const imgs = [...c.querySelectorAll('img')].filter(i => !i.closest('.se-sticker, .se-oglink'));
       if (cls.some(k => /^se-image/.test(k)) || (imgs.length && !c.querySelector('.se-text-paragraph'))) {
         const cap = clean((c.querySelector('.se-caption') || {}).innerText);

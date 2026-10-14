@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from . import images, pipeline
+from . import hooks, images, pipeline
 from .config import APP_DIR, IMAGES_DIR, OUTPUT_DIR, ROOT, ffmpeg_exe, load_settings
 
 STATIC = APP_DIR / "static"
@@ -104,6 +104,7 @@ class Handler(BaseHTTPRequestHandler):
             except RuntimeError:
                 has_ffmpeg = False
             return self._json({"ffmpeg": has_ffmpeg, "tts_engine": s["tts_engine"],
+                               "topics": hooks.choices(), "hook_styles": hooks.HOOK_STYLES,
                                "tts_speed": s["tts_speed"],
                                "ai_model": s["ai_model"], "jobs": pipeline.list_jobs()})
         parts = path.strip("/").split("/")
@@ -158,6 +159,11 @@ class Handler(BaseHTTPRequestHandler):
                 if action == "render":
                     job.start_render(body.get("tts_engine"), body.get("tts_speed"))
                     return self._json({"ok": True})
+                if action == "rebuild":
+                    return self._json(job.rebuild_script(body.get("topic_id") or "auto",
+                                                         body.get("hook_style") or "question"))
+                if action == "image_delete":
+                    return self._json(job.delete_image(body.get("index")))
                 if action == "image_edit":
                     return self._json(job.edit_image(body.get("index"), body.get("edits") or {}))
                 if action == "preview":

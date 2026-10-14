@@ -36,6 +36,10 @@ video{display:block;width:100%;max-width:340px;aspect-ratio:9/16;margin:0 auto;b
 .ph .tag{position:absolute;right:4px;bottom:4px;background:var(--accent);color:#fff;font-size:11px;padding:1px 5px;border-radius:5px}
 .ph.sel{border-color:var(--accent)}.ph .ord{position:absolute;right:4px;top:4px;background:var(--accent);color:#fff;font-weight:700;font-size:13px;min-width:22px;text-align:center;border-radius:11px}
 .thumbs img{cursor:pointer}
+.ph .del{position:absolute;right:4px;top:4px;width:24px;height:24px;padding:0;border-radius:12px;background:rgba(0,0,0,.7);color:#fff;font-size:14px;line-height:24px;font-weight:700}
+.ph .del:hover{background:var(--bad)}
+.hookbar{display:flex;gap:8px;flex-wrap:wrap;align-items:end;background:var(--bg);border-radius:10px;padding:10px;margin:10px 0}
+.hookbar label{display:block;font-size:12px;color:var(--sub);margin-bottom:2px}.hookbar select{min-width:150px}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px;z-index:10}
 .modal[hidden]{display:none}.modal .box{background:var(--card);border-radius:14px;padding:16px;width:min(920px,100%);max-height:94vh;overflow:auto}
 .editor{display:grid;grid-template-columns:1fr 260px;gap:16px}@media (max-width:760px){.editor{grid-template-columns:1fr}}
@@ -83,6 +87,12 @@ a{color:var(--accent)}
       <section class="card" id="scriptCard" hidden>
         <div class="row" style="justify-content:space-between"><h2 style="margin:0">대본·장면 <span id="mode" class="pill"></span></h2>
           <div class="row"><button class="ghost" id="saveScript">수정 저장</button><button class="ghost" id="aiBtn">AI로 다시 쓰기(유료)</button></div></div>
+        <div class="hookbar">
+          <div><label>시공 주제</label><select id="topicSel"></select></div>
+          <div><label>훅 스타일</label><select id="hookSel"></select></div>
+          <button class="ghost" id="rebuildBtn">대본 다시 만들기 (무료)</button>
+          <span class="muted" style="flex-basis:100%">주제에 맞춰 <b>훅 → 왜 해야 하는지 → 이번 현장 진행 → 혹할 포인트 → 결과 → 상담</b> 순서로 씁니다. 현장 내용은 블로그 문장만 사용합니다.</span>
+        </div>
         <label class="muted">엔딩 상단 문구</label><input id="endHeader" style="width:100%">
         <div id="scenes"></div>
       </section>
@@ -129,6 +139,7 @@ a{color:var(--accent)}
       <div class="slider"><span>대비</span><input type="range" id="edC" min="0.3" max="2" step="0.05"><span id="edCv"></span></div>
       <div class="slider"><span>채도</span><input type="range" id="edS" min="0" max="2" step="0.05"><span id="edSv"></span></div>
       <div class="row" style="margin-top:16px"><button class="ghost" id="edReset">원래대로</button><button id="edSave" style="flex:1">저장</button></div>
+      <button class="ghost" id="edDelete" style="width:100%;margin-top:8px;color:var(--bad)">이 사진 삭제</button>
       <p class="muted" id="edMsg"></p>
     </div>
   </div>
@@ -155,6 +166,11 @@ async function api(path, body) {
 }
 async function loadRecent() {
   try { const s = await api('/api/status');
+    if (s.topics && !$('#topicSel').options.length) {
+      $('#topicSel').innerHTML = '<option value="auto">자동 감지</option>' + s.topics.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+      $('#hookSel').innerHTML = Object.entries(s.hook_styles).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
+      syncHookBar();
+    }
     if (!s.ffmpeg) $('#recent').innerHTML = '<span class="bad">FFmpeg를 찾지 못했습니다. README의 설치 방법을 확인하세요.</span>';
     else $('#recent').innerHTML = s.jobs.length ? '최근 작업: ' + s.jobs.slice(0,6).map(j => `<a href="#${j.id}">${esc(j.title || j.id)}</a> <span class="pill">${STATUS[j.status]||j.status}</span>`).join(' · ') : '';
   } catch (e) {}
@@ -205,9 +221,17 @@ function renderUsage(u) {
     + s((u.input_tokens + u.output_tokens).toLocaleString(), `토큰 (입력 ${u.input_tokens} / 출력 ${u.output_tokens})`)
     + s(u.ai_calls + '회', 'AI 호출') + s('0원', esc(u.tts || '음성: 무료'));
 }
+let curScript = null;
+function syncHookBar() {
+  const sc = curScript; if (!sc || !$('#topicSel').options.length) return;
+  $('#topicSel').value = sc.topic_choice || 'auto';
+  $('#topicSel').options[0].textContent = '자동 감지' + (sc.topic_name ? ` (${sc.topic_name})` : '');
+  $('#hookSel').value = sc.hook_style || 'question';
+}
 function renderScript(sc) {
   $('#mode').textContent = sc.mode === 'ai' ? 'AI 대본' : '무료 규칙 기반';
   $('#endHeader').value = sc.end_header;
+  curScript = sc; syncHookBar();
   $('#scenes').innerHTML = sc.scenes.map((s, i) => `
     <div class="scene" data-kind="${s.kind}">
       <div><div class="muted">${i + 1}. ${s.kind === 'hook' ? '오프닝' : s.kind === 'cta' ? '엔딩(CTA)' : '본문'}</div>
@@ -279,9 +303,10 @@ function renderGallery() {
   const key = list.map(im => im.url + JSON.stringify(im.edits)).join('|');
   if (key === galleryKey) return; galleryKey = key;
   $('#photoCount').textContent = `${list.length}장`;
-  $('#gallery').innerHTML = list.map(im => `<div class="ph" data-edit="${im.index}" title="사진 ${im.index} 편집"><img src="${im.url}" loading="lazy"><span class="no">${im.index}</span>${im.uploaded ? '<span class="tag">추가</span>' : isEdited(im) ? '<span class="tag">편집됨</span>' : ''}</div>`).join('');
+  $('#gallery').innerHTML = list.map(im => `<div class="ph" data-edit="${im.index}" title="사진 ${im.index} 편집"><img src="${im.url}" loading="lazy"><span class="no">${im.index}</span><button class="del" data-del="${im.index}" title="사진 ${im.index} 삭제">✕</button>${im.uploaded ? '<span class="tag">추가</span>' : isEdited(im) ? '<span class="tag">편집됨</span>' : ''}</div>`).join('');
 }
 document.addEventListener('click', e => {
+  const del = e.target.closest('[data-del]'); if (del) { e.stopPropagation(); return deleteImage(+del.dataset.del); }
   const ed = e.target.closest('[data-edit]'); if (ed) return openEditor(+ed.dataset.edit);
   const pk = e.target.closest('[data-pick]'); if (pk) return openPicker(+pk.dataset.pick);
 });
@@ -343,6 +368,30 @@ $('#edSave').onclick = async () => {
     $('#edModal').hidden = true;
   } catch (e) { $('#edMsg').textContent = e.message; }
   btn.disabled = false;
+};
+
+// ---- 사진 삭제 ----
+async function deleteImage(n) {
+  if (!confirm(`사진 ${n}번을 이 영상에서 뺄까요?\n(PC에 저장된 원본 파일은 지우지 않습니다)`)) return;
+  try {
+    await api(`/api/jobs/${jobId}/image_delete`, {index: n});
+    delete images[n]; galleryKey = ''; renderGallery();
+    document.querySelectorAll('.scene').forEach(sc => {
+      const inp = sc.querySelector('.imgs'); if (!inp) return;
+      const left = inp.value.split(',').map(x => parseInt(x)).filter(x => !isNaN(x) && x !== n);
+      inp.value = left.join(', ');
+      sc.querySelectorAll(`.thumbs img[data-edit="${n}"]`).forEach(i => i.remove());
+    });
+    $('#edModal').hidden = true;
+  } catch (e) { alert(e.message); }
+}
+$('#edDelete').onclick = () => deleteImage(ed.index);
+
+// ---- 주제·훅 스타일로 대본 다시 만들기 ----
+$('#rebuildBtn').onclick = async () => {
+  if (!confirm('주제와 훅 스타일에 맞춰 대본을 새로 만듭니다.\n지금 화면에서 고친 대본 내용은 사라집니다. 진행할까요? (무료)')) return;
+  try { await api(`/api/jobs/${jobId}/rebuild`, {topic_id: $('#topicSel').value, hook_style: $('#hookSel').value}); lastScriptKey = ''; poll(); }
+  catch (e) { alert(e.message); }
 };
 
 // ---- 장면 사진 고르기 ----

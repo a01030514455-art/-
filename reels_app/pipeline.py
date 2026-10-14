@@ -107,6 +107,32 @@ class Job:
         self.log(f"내 사진 추가: {index}번")
         return self._image_public(b)
 
+    def rebuild_script(self, topic_id="auto", hook_style="question"):
+        """주제·훅 스타일을 바꿔 무료 대본을 다시 만든다(AI 미사용)."""
+        if not self.post:
+            raise RuntimeError("먼저 블로그 글을 가져와야 합니다.")
+        live = {b["index"]: b for b in self.post["images"]}
+        post = dict(self.post, blocks=[b for b in self.post["blocks"]
+                                       if b["type"] != "image" or b.get("index") in live])
+        self.state["script"] = script_rules.build(post, load_settings(), topic_id=topic_id, hook_style=hook_style)
+        self.state["script_edited"] = False
+        self.log(f"대본 다시 만들기: 주제 {self.state['script']['topic_name']}, 훅 {hook_style}")
+        self.save()
+        return script_for_ui(self.state["script"])
+
+    def delete_image(self, index):
+        """사진을 이 작업에서 뺀다(파일은 지우지 않음). 장면에 들어 있던 것도 함께 빠진다."""
+        b = self._find_image(index)
+        self.post["images"] = [x for x in self.post["images"] if x["index"] != b["index"]]
+        self.post.setdefault("deleted", []).append(b["index"])
+        self._save_post()
+        if self.state.get("script"):
+            for s in self.state["script"]["scenes"]:
+                s["images"] = [im for im in s.get("images", []) if im.get("index") != b["index"]]
+            self.save()
+        self.log(f"사진 {b['index']} 삭제")
+        return {"ok": True, "index": b["index"]}
+
     def _resolve_images(self, script):
         """대본의 사진을 현재 편집 상태(편집본 파일·중심점)로 바꿔 렌더링에 넘긴다."""
         if not self.post:
@@ -116,7 +142,9 @@ class Job:
         for s in script["scenes"]:
             ims = []
             for im in s.get("images", []):
-                b = by_index.get(im.get("index"), im)
+                if im.get("index") not in by_index:
+                    continue  # 삭제된 사진
+                b = by_index[im["index"]]
                 ims.append(dict(b, file=b.get("edited_file") or b["file"],
                                 focus=(b.get("edits") or {}).get("focus", [0.5, 0.5])))
             scenes.append(dict(s, images=ims))
@@ -217,7 +245,12 @@ class Job:
                 chars = sum(script_rules.speech_len(s["narration"]) for s in script["scenes"])
                 cps = chars / max(1.0, secs - render.CTA_HOLD - render.GAP_AFTER * len(script["scenes"]))
                 self.log(f"예상 {secs:.1f}초 → 실제 말하기 속도({cps:.1f}자/초)로 대본 분량 재조정")
-                script = script_rules.build(self.post, settings, chars_per_sec=cps * 0.97)
+                live = {b["index"] for b in self.post["images"]}
+                post = dict(self.post, blocks=[b for b in self.post["blocks"]
+                                               if b["type"] != "image" or b.get("index") in live])
+                script = script_rules.build(post, settings, chars_per_sec=cps * 0.97,
+                                            topic_id=script.get("topic_choice", "auto"),
+                                            hook_style=script.get("hook_style", "question"))
                 self.state["script"] = script
         res = render.render(self._resolve_images(script), self.dir, settings, log=self.log,
                             progress=lambda p, m="": self.set(progress=p, message=m))
@@ -240,6 +273,8 @@ def _voice_settings(tts_engine=None, tts_speed=None):
 
 def script_for_ui(script):
     return {"mode": script["mode"], "topic": script["topic"], "end_header": script["end_header"],
+            "topic_id": script.get("topic_id", "generic"), "topic_name": script.get("topic_name", ""),
+            "topic_choice": script.get("topic_choice", "auto"), "hook_style": script.get("hook_style", "question"),
             "scenes": [{"narration": s["narration"], "label": s.get("label", ""), "kind": s.get("kind", "body"),
                         "highlight": ", ".join(s.get("highlight", [])),
                         "images": [im["index"] for im in s.get("images", []) if "index" in im]}

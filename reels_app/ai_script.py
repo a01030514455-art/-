@@ -6,6 +6,7 @@ import json
 import os
 import re
 
+from . import hooks
 from .script_rules import assign_images, keywords, topic_from_title
 
 SYSTEM = """너는 집수리·시공 업체의 인스타 릴스/유튜브 쇼츠 대본 작가다.
@@ -13,8 +14,9 @@ SYSTEM = """너는 집수리·시공 업체의 인스타 릴스/유튜브 쇼츠
 말투와 구조(레퍼런스 영상 기준):
 - 친근한 존댓말(~죠?, ~했는데요, ~입니다, ~거예요). 짧은 문장, 과장/허위 금지, 글에 없는 사실 추가 금지.
 - 1장면: 시청자 공감 훅 질문(예: "멀쩡해 보이던 우리 집 바닥, 파손된 거 보신 적 있으시죠?")
-- 2장면: 왜 문제인지(예: "단순히 미관상 문제만 있는 게 아니라 ~")
-- "그래서 오늘은 ~" 로 해결 소개 → 작업 과정 2~5장면 → 결과 1장면
+- 2~3장면: 왜 해야 하는지(안전성·위험·손해. 예: "단순히 미관상 문제만 있는 게 아니라 ~")
+- "이런 시공이 있다" 소개 → "이번 현장에서는 이렇게 진행했습니다" → 작업 과정 2~5장면(글의 사실만)
+- 글에 나온 세부 키워드의 장점(혹할 포인트)을 1~2장면 → 결과 1장면
 - 마지막 장면은 반드시 CTA 문장 그대로.
 - 각 장면 label은 화면 상단에 뜨는 12자 안팎 요약 문구(예: "전용 접착제 균일 도포").
 - highlight는 자막에서 색으로 강조할 핵심 단어 1개(내레이션에 그대로 등장해야 함).
@@ -32,6 +34,13 @@ def build_prompt(post: dict, settings: dict) -> tuple[str, str]:
             cap = b.get("caption") or b.get("alt") or ""
             lines.append(f"[사진 {b['index']}{': ' + cap if cap else ''}]")
     target_chars = int(settings["target_seconds"] * 6.2)
+    full = post.get("title", "") + "\n".join(b.get("text") or "" for b in post["blocks"])
+    T, _ = hooks.detect(full)
+    if T["id"] != "generic":
+        lines += ["", f"[참고: 감지된 주제 '{T['name']}'의 후킹 방향(그대로 베끼지 말고 참고)]",
+                  "훅 예시: " + " / ".join(T["hooks"].values()),
+                  "왜 해야 하는지: " + " ".join(T["why"]),
+                  "혹할 포인트: " + " / ".join(t for _, t in hooks.matched_points(T, full))]
     system = SYSTEM.replace("TARGET_CHARS", str(target_chars))
     user = "\n".join(lines) + f"\n\nCTA 문장: {settings['cta_text']}"
     return system, user
