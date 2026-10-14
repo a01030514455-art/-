@@ -277,6 +277,9 @@ a{color:var(--accent)}
 <div class="modal" id="keysModal" hidden><div class="box" style="width:min(640px,100%)">
   <div class="row" style="justify-content:space-between;margin-bottom:8px"><h2 style="margin:0">API 키 설정</h2><button class="ghost" id="keysClose">닫기</button></div>
   <p class="muted" style="margin-top:0">모두 무료로 발급됩니다. 키는 이 PC의 <b>settings.local.json</b>에만 저장되고 GitHub에는 올라가지 않습니다. 빈칸은 기존 값을 유지합니다.</p>
+  <h2 style="font-size:15px;margin:12px 0 4px">Claude AI 대본 (선택 · 유료)</h2>
+  <p class="muted" style="margin:0 0 6px">'AI로 다시 쓰기'에만 씁니다. <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>에서 키를 만들고 결제 수단(크레딧)을 등록해야 합니다. 1편당 약 2~3원 예상이며, 매번 예상 비용을 보여 주고 승인할 때만 호출합니다.</p>
+  <div class="keyrow"><span>Claude API 키</span><input id="kAnthropic" type="password" placeholder="sk-ant-... 입력하면 저장"></div>
   <h2 style="font-size:15px;margin:12px 0 4px">Azure Speech (선택)</h2>
   <p class="muted" style="margin:0 0 6px">Azure Portal에서 Speech 리소스를 <b>가격 책정 계층 F0(무료)</b>로 만들면 월 50만 자까지 무료입니다. F0는 한도를 넘으면 요청이 거절될 뿐 과금되지 않습니다. S0는 첫 글자부터 과금됩니다.</p>
   <div class="keyrow"><span>키 (KEY 1)</span><input id="kAzKey" type="password" placeholder="입력하면 저장"></div>
@@ -402,7 +405,7 @@ $('#saveScript').onclick = async () => { try { await api(`/api/jobs/${jobId}/scr
 $('#aiBtn').onclick = async () => {
   try {
     const e = await api(`/api/jobs/${jobId}/ai_estimate`);
-    if (!e.api_key_found) return alert('ANTHROPIC_API_KEY가 설정되어 있지 않습니다. 무료 대본을 그대로 쓰거나, README의 AI 설정을 참고하세요.');
+    if (!e.api_key_found) { alert('Claude API 키가 아직 없습니다.\n\n영상 만들기 칸의 [⚙ API 키 설정]에서 "Claude API 키"를 넣고 저장한 뒤 다시 눌러 주세요.\n(키가 없어도 무료 대본은 그대로 쓸 수 있습니다)'); return $('#keysBtn').click(); }
     const ok = confirm(`AI 대본 작성 예상 비용\n\n모델: ${e.model}\n입력 약 ${e.input_tokens_est.toLocaleString()} 토큰, 출력 최대 약 ${e.output_tokens_est.toLocaleString()} 토큰\n예상: 약 $${e.usd_est} (약 ${e.krw_est}원)\n\n실제 사용량은 실행 후 '이번 영상 비용'에 기록됩니다. 진행할까요?`);
     if (!ok) return;
     await api(`/api/jobs/${jobId}/ai_script`, {approved: true}); lastScriptKey=''; open(jobId);
@@ -516,15 +519,15 @@ function ttsUsageStat(u) {
 // ---- API 키 설정 ----
 $('#keysBtn').onclick = async () => {
   try { const s = await api('/api/status'); $('#kAzRegion').value = s.azure_region || ''; $('#kAzTier').value = s.azure_tier || 'F0';
-    $('#keysMsg').textContent = `현재: Azure ${s.azure_ready ? '설정됨' : '없음'} · Pexels ${s.stock_ready.pexels ? '설정됨' : '없음'} · Pixabay ${s.stock_ready.pixabay ? '설정됨' : '없음'}`; } catch (e) {}
+    $('#keysMsg').textContent = `현재: Claude ${s.ai_ready ? '설정됨' : '없음'} · Azure ${s.azure_ready ? '설정됨' : '없음'} · Pexels ${s.stock_ready.pexels ? '설정됨' : '없음'} · Pixabay ${s.stock_ready.pixabay ? '설정됨' : '없음'}`; } catch (e) {}
   $('#keysModal').hidden = false;
 };
 $('#keysClose').onclick = () => { $('#keysModal').hidden = true; };
 $('#keysSave').onclick = async () => {
   try {
-    await api('/api/settings/keys', {azure_key: $('#kAzKey').value, azure_region: $('#kAzRegion').value, azure_tier: $('#kAzTier').value,
+    await api('/api/settings/keys', {anthropic_key: $('#kAnthropic').value, azure_key: $('#kAzKey').value, azure_region: $('#kAzRegion').value, azure_tier: $('#kAzTier').value,
       pexels_key: $('#kPexels').value, pixabay_key: $('#kPixabay').value});
-    ['#kAzKey', '#kPexels', '#kPixabay'].forEach(id => $(id).value = '');
+    ['#kAnthropic', '#kAzKey', '#kPexels', '#kPixabay'].forEach(id => $(id).value = '');
     $('#keysModal').hidden = true; loadVoices(); loadUsage();
   } catch (e) { $('#keysMsg').textContent = e.message; }
 };

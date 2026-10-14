@@ -68,7 +68,7 @@
 
 - AI 대본은 화면의 **AI로 다시 쓰기(유료)** 버튼을 눌러 예상 토큰·비용을 확인하고 승인했을 때만 실행됩니다.
 - 실제 사용량은 "이번 영상 비용" 칸과 `job.json`에 기록됩니다.
-- AI를 쓰려면 `pip install anthropic`을 설치하고 환경변수 `ANTHROPIC_API_KEY`를 설정해야 합니다.
+- AI를 쓰려면 화면의 **⚙ API 키 설정**에서 **Claude API 키**를 넣고 저장하세요(console.anthropic.com에서 키 발급·크레딧 충전 필요). 키는 이 PC의 `settings.local.json`에만 저장됩니다.
 
 ## 설정 (`settings.json`, 선택)
 프로젝트 폴더에 `settings.json`을 만들면 기본값을 바꿀 수 있습니다. 전체 항목은 `reels_app/config.py`에 있습니다.

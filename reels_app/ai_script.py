@@ -54,7 +54,12 @@ def estimate(post: dict, settings: dict) -> dict:
     usd = in_tok / 1e6 * settings["ai_price_in_per_mtok"] + out_tok / 1e6 * settings["ai_price_out_per_mtok"]
     return {"model": settings["ai_model"], "input_tokens_est": in_tok, "output_tokens_est": out_tok,
             "usd_est": round(usd, 5), "krw_est": round(usd * settings["usd_to_krw"], 1),
-            "api_key_found": bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))}
+            "api_key_found": bool(api_key(settings) or os.environ.get("ANTHROPIC_AUTH_TOKEN"))}
+
+
+def api_key(settings: dict) -> str:
+    """앱의 ⚙ API 키 설정(settings.local.json)에 넣은 키를 우선, 없으면 환경변수."""
+    return settings.get("anthropic_key") or os.environ.get("ANTHROPIC_API_KEY", "")
 
 
 def generate(post: dict, settings: dict) -> tuple[dict, dict]:
@@ -63,12 +68,26 @@ def generate(post: dict, settings: dict) -> tuple[dict, dict]:
     except ImportError:
         raise RuntimeError("AI 대본을 쓰려면 `pip install anthropic`이 필요합니다.")
     system, user = build_prompt(post, settings)
-    client = anthropic.Anthropic()
-    msg = client.messages.create(
-        model=settings["ai_model"], max_tokens=8000, system=system,
-        output_config={"effort": "low"},
-        messages=[{"role": "user", "content": user}],
-    )
+    key = api_key(settings)
+    client = anthropic.Anthropic(api_key=key) if key else anthropic.Anthropic()
+    try:
+        msg = client.messages.create(
+            model=settings["ai_model"], max_tokens=8000, system=system,
+            output_config={"effort": "low"},
+            messages=[{"role": "user", "content": user}],
+        )
+    except anthropic.AuthenticationError:
+        raise RuntimeError("Claude API 키가 올바르지 않습니다. ⚙ API 키 설정에서 키를 다시 확인해 주세요.")
+    except anthropic.PermissionDeniedError:
+        raise RuntimeError("이 키로는 해당 모델을 쓸 권한이 없습니다. Anthropic 콘솔에서 키 권한을 확인해 주세요.")
+    except anthropic.RateLimitError:
+        raise RuntimeError("요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.")
+    except anthropic.BadRequestError as e:
+        if "credit" in str(e).lower() or "billing" in str(e).lower():
+            raise RuntimeError("Anthropic 계정의 크레딧(결제 잔액)이 부족합니다. console.anthropic.com 의 Billing에서 충전해 주세요.")
+        raise RuntimeError(f"AI 요청 오류: {e}")
+    except anthropic.APIConnectionError:
+        raise RuntimeError("Claude 서버에 연결하지 못했습니다. 인터넷 연결을 확인해 주세요.")
     u = msg.usage
     usd = u.input_tokens / 1e6 * settings["ai_price_in_per_mtok"] + u.output_tokens / 1e6 * settings["ai_price_out_per_mtok"]
     usage = {"model": settings["ai_model"], "input_tokens": u.input_tokens, "output_tokens": u.output_tokens,

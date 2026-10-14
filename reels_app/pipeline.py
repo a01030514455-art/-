@@ -275,7 +275,12 @@ class Job:
 
     def _ai(self):
         self.set(status="ai", progress=10, message="AI 대본 작성 중")
-        script, usage = ai_script.generate(self.post, load_settings())
+        try:
+            script, usage = ai_script.generate(self.post, load_settings())
+        except RuntimeError as e:  # AI가 실패해도 무료 대본은 그대로 두고 작업은 계속 쓸 수 있게
+            self.log("AI 대본 실패: " + str(e))
+            self.set(status="ready", progress=100, message="AI 대본 실패 — " + str(e) + " (기존 대본은 그대로입니다)")
+            return
         u = self.state["usage"]
         u["ai_calls"] += 1
         for k in ("input_tokens", "output_tokens", "usd", "krw"):

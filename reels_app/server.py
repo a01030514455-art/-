@@ -1,6 +1,7 @@
 """내 PC에서만 열리는 웹앱 서버(파이썬 표준 라이브러리만 사용). 실행: python -m reels_app"""
 import json
 import mimetypes
+import os
 import time
 import traceback
 import webbrowser
@@ -120,6 +121,7 @@ class Handler(BaseHTTPRequestHandler):
                                "azure_ready": all(voices.azure_conf(s)[k] for k in ("key", "region")),
                                "azure_tier": voices.azure_conf(s)["tier"], "azure_region": voices.azure_conf(s)["region"],
                                "stock_ready": {k: bool(v) for k, v in stock.keys(s).items()},
+                               "ai_ready": bool(s.get("anthropic_key") or os.environ.get("ANTHROPIC_API_KEY")),
                                "tts_speed": s["tts_speed"],
                                "ai_model": s["ai_model"], "jobs": pipeline.list_jobs()})
         parts = path.strip("/").split("/")
@@ -160,7 +162,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, "saved": upd})
             if parts == ["api", "settings", "keys"]:
                 body = self._body()
-                upd = {k: str(body[k]).strip() for k in ("azure_key", "azure_region", "azure_tier", "pexels_key", "pixabay_key")
+                upd = {k: str(body[k]).strip() for k in ("azure_key", "azure_region", "azure_tier", "pexels_key", "pixabay_key", "anthropic_key")
                        if body.get(k) not in (None, "")}
                 if upd.get("azure_tier") and upd["azure_tier"] not in ("F0", "S0"):
                     return self._json({"error": "Azure 티어는 F0 또는 S0만 가능합니다"}, 400)
