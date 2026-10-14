@@ -118,8 +118,12 @@ class Job:
     def _duration(self):
         return float((self.state.get("result") or {}).get("seconds") or 60)
 
-    def save_overlays(self, overlays):
-        self.state["overlays"] = [editing.clean_overlay(o, self._duration()) for o in overlays][:30]
+    def save_overlays(self, overlays, auto_style=None):
+        self.state["overlays"] = [editing.clean_overlay(o, self._duration()) for o in overlays][:300]
+        if auto_style is not None:
+            self.state["auto_style"] = {g: {k: v for k, v in (auto_style.get(g) or {}).items()
+                                            if k in ("dy", "dx", "scale", "color", "hl_color", "bg", "bg_opacity", "shadow", "stroke")}
+                                        for g in editing.AUTO_GROUPS}
         self.save()
         return self.state["overlays"]
 
@@ -134,7 +138,9 @@ class Job:
         if not base.exists():  # 이 기능 전에 만든 영상: 현재 영상을 기본본으로 보관
             shutil.copyfile(self.dir / "reel.mp4", base)
             self.state["result"]["base_video"] = str(base)
-        out = editing.compose(base, self.state.get("overlays", []), self.dir / "reel.mp4", self.log)
+        n_frames = max(1, int(self._duration() * render.FPS))
+        out = editing.compose(base, self.state.get("overlays", []), self.dir / "reel.mp4", self.log,
+                              lambda n: self.set(progress=10 + 89 * n / n_frames))
         self.state["result"]["video"] = str(out)
         self.state["result"]["edited_at"] = time.strftime("%H:%M:%S")
         self.set(status="done", progress=100, message=f"문구 {len(self.state.get('overlays', []))}개 반영 완료")
@@ -222,7 +228,9 @@ class Job:
                 ims.append(dict(b, file=b.get("edited_file") or b["file"],
                                 focus=(b.get("edits") or {}).get("focus", [0.5, 0.5])))
             scenes.append(dict(s, images=ims))
-        return dict(script, scenes=scenes)
+        all_images = [dict(b, file=b.get("edited_file") or b["file"], focus=(b.get("edits") or {}).get("focus", [0.5, 0.5]))
+                      for b in sorted(self.post["images"], key=lambda b: b["index"])]
+        return dict(script, scenes=scenes, all_images=all_images)
 
     def _run(self, fn):
         if self.busy:
@@ -378,9 +386,17 @@ class Job:
         self.state["usage"]["tts_free"] = billable == 0
         # 추가 문구 합성(AI·음성 재호출 없음). 문구가 없으면 기본 영상을 그대로 최종본으로.
         self.set(progress=99, message="추가 문구 합성 중")
-        ovs = [editing.clean_overlay(o, res["seconds"]) for o in self.state.get("overlays", [])]
-        res["video"] = str(editing.compose(Path(res["base_video"]), ovs, self.dir / "reel.mp4", self.log))
+        # 자동 문구(상단 문구·자막·엔딩 문구)는 새 대본으로 다시 만들고, 사용자가 정한 그룹 설정(위치·크기·색)을 적용.
+        # 직접 추가한 문구는 그대로 유지.
+        style = self.state.get("auto_style", {})
+        autos = [editing.apply_auto_style(editing.clean_overlay(o, res["seconds"]), style) for o in res.pop("auto_overlays")]
+        mine = [editing.clean_overlay(o, res["seconds"]) for o in self.state.get("overlays", []) if not o.get("auto")]
+        self.state["overlays"] = autos + mine
+        n_frames = max(1, int(res["seconds"] * render.FPS))
+        res["video"] = str(editing.compose(Path(res["base_video"]), self.state["overlays"], self.dir / "reel.mp4", self.log,
+                                           lambda n: self.set(progress=min(99.5, 98 + 1.5 * n / n_frames))))
         self.state.pop("thumb_recos", None)
+        res["render_id"] = time.strftime("%Y%m%d%H%M%S")
         if res["clips_used"]:
             (self.dir / "credits.txt").write_text(stock.credits_text(res["clips_used"]), encoding="utf-8")
             res["credits"] = str(self.dir / "credits.txt")

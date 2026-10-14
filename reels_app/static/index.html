@@ -192,8 +192,22 @@ a{color:var(--accent)}
       <div>
         <div class="row"><button id="ovAdd">+ 문구 추가</button><select id="tplSel" style="flex:1;min-width:140px"></select><button class="ghost" id="tplApply">템플릿으로 추가</button></div>
         <div class="ovlist" id="ovList"></div>
+        <div id="grpForm" hidden>
+          <p style="margin:4px 0 8px"><b id="gTitle"></b> <span class="muted">— 바꾸면 같은 종류 문구 전체에 한 번에 적용됩니다.</span></p>
+          <div class="frow"><span>세로 위치</span><input type="range" id="gY" min="-0.6" max="0.6" step="0.005"></div>
+          <div class="frow"><span>가로 위치</span><input type="range" id="gX" min="-0.4" max="0.4" step="0.005"></div>
+          <div class="frow"><span>크기</span><div class="row" style="flex-wrap:nowrap"><input type="range" id="gScale" min="0.5" max="1.8" step="0.05" style="flex:1"><b id="gScaleV" style="min-width:48px;text-align:right"></b></div></div>
+          <div class="frow"><span>글자 색</span><div class="row"><input type="color" id="gColor"><label class="muted"><input type="checkbox" id="gColorOn"> 전체 같은 색으로</label></div></div>
+          <div class="frow"><span>강조 색</span><input type="color" id="gHl"></div>
+          <div class="frow"><span>배경</span><div class="row" style="flex-wrap:nowrap"><label><input type="checkbox" id="gBgOn"> 사용</label><input type="color" id="gBg"><input type="range" id="gBgOp" min="0" max="1" step="0.05" style="flex:1;padding:0"></div></div>
+          <div class="frow"><span>효과</span><div class="row"><label><input type="checkbox" id="gShadow"> 그림자</label><label><input type="checkbox" id="gStroke"> 외곽선</label></div></div>
+          <p class="warn" id="gWarn" style="margin:4px 0"></p>
+          <button class="ghost" id="gReset">원래 위치·크기로</button>
+        </div>
         <div id="ovForm" hidden>
+          <p class="muted" id="fAutoNote" style="margin:4px 0" hidden></p>
           <div class="frow"><span>문구</span><textarea id="fText" rows="2"></textarea></div>
+          <div class="frow"><span>강조 단어</span><div class="row" style="flex-wrap:nowrap"><input id="fHl" placeholder="쉼표로 구분" style="flex:1;min-width:0"><input type="color" id="fHlColor" title="강조 색"></div></div>
           <div class="frow"><span>시작 / 끝(초)</span><div class="row" style="flex-wrap:nowrap"><input type="number" id="fStart" step="0.1" min="0" style="width:80px"><button class="ghost" id="fStartNow" title="현재 재생 위치">현재</button><input type="number" id="fEnd" step="0.1" min="0" style="width:80px"><button class="ghost" id="fEndNow" title="현재 재생 위치">현재</button></div></div>
           <div class="frow"><span>글자 크기</span><input type="range" id="fSize" min="20" max="200" step="2"></div>
           <div class="frow"><span>글자 색</span><input type="color" id="fColor"></div>
@@ -201,6 +215,7 @@ a{color:var(--accent)}
           <div class="frow"><span>효과</span><div class="row"><label><input type="checkbox" id="fShadow"> 그림자</label><label><input type="checkbox" id="fStroke"> 외곽선</label></div></div>
           <div class="frow"><span>가로 위치</span><input type="range" id="fX" min="0" max="1" step="0.005"></div>
           <div class="frow"><span>세로 위치</span><input type="range" id="fY" min="0" max="1" step="0.005"></div>
+          <label id="fGroupMoveL" style="font-size:13px" hidden><input type="checkbox" id="fGroupMove" checked> 끌어서 옮길 때 같은 종류 전체를 함께 이동</label>
           <p class="warn" id="fWarn" style="margin:4px 0"></p>
           <div class="row"><button class="ghost" id="ovDel" style="color:var(--bad)">이 문구 삭제</button><button class="ghost" id="tplSave">템플릿으로 저장</button><button class="ghost" id="tplDel">선택한 템플릿 삭제</button></div>
         </div>
@@ -733,6 +748,13 @@ function renderSafe(layer) {
     <div class="safe" style="bottom:0;height:${z.bottom / 19.2}%">하단 설명·자막 영역</div>
     <div class="safe side" style="width:${z.right / 10.8}%;right:0;top:${z.top / 19.2}%;bottom:${z.bottom / 19.2}%">버튼</div>`;
 }
+const GROUPS = {sub: '자동 자막', label: '자동 상단·엔딩 문구'};
+let AUTO_STYLE = {}, openGroups = {};
+function ovHTML(o) {  // 강조 단어만 다른 색(서버 합성과 같은 규칙: 단어에 강조어가 들어 있으면 색칠)
+  const hl = (o.hl || []).filter(Boolean), hc = o.hl_color || o.color;
+  return String(o.text).split('\n').map(line => line.split(' ').map(w =>
+    hl.some(h => w.includes(h)) ? `<span style="color:${hc}">${esc(w)}</span>` : esc(w)).join(' ')).join('\n');
+}
 function ovStyle(el, o, sc) {
   const fs = o.size * sc;
   Object.assign(el.style, {left: o.x * 100 + '%', top: o.y * 100 + '%', fontSize: fs + 'px', color: o.color,
@@ -741,32 +763,61 @@ function ovStyle(el, o, sc) {
   if (o.stroke) { const w = Math.max(1, fs * .06); for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,-1],[1,-1],[-1,1]]) sh.push(`${dx * w}px ${dy * w}px 0 #0a0a0c`); }
   if (o.shadow) sh.push(`${fs * .05}px ${fs * .05}px ${fs * .12}px rgba(0,0,0,.66)`);
   el.style.textShadow = sh.join(',');
-  el.textContent = o.text;
+  el.innerHTML = ovHTML(o);
 }
+const selGroup = () => (ovSel || '').startsWith('g:') ? ovSel.slice(2) : null;
 function drawOverlays() {
-  const v = $('#edVideo'), t = v.currentTime, sc = edScale(), layer = $('#ovLayer');
+  const v = $('#edVideo'), t = v.currentTime, sc = edScale(), layer = $('#ovLayer'), g = selGroup();
   layer.innerHTML = '';
   OV.forEach(o => {
     const on = t >= o.start && t <= o.end;
     if (!on && o.id !== ovSel) return;
-    const el = document.createElement('div'); el.className = 'ov' + (o.id === ovSel ? ' sel' : ''); el.dataset.id = o.id;
+    const el = document.createElement('div'); el.className = 'ov' + (o.id === ovSel || (g && o.auto === g) ? ' sel' : ''); el.dataset.id = o.id;
     ovStyle(el, o, sc); if (!on) { el.style.opacity = .45; el.title = '지금 시간에는 안 보이는 문구(편집 중이라 흐리게 표시)'; }
     layer.appendChild(el);
   });
   $('#edTime').textContent = `${t.toFixed(1)}초 / ${edDur.toFixed(1)}초`; $('#edSeek').value = t;
   const o = OV.find(x => x.id === ovSel); $('#fWarn').textContent = o ? safeIssue(o) : '';
+  if (g) { const bad = OV.filter(x => x.auto === g && safeIssue(x)).length; $('#gWarn').textContent = bad ? `${bad}개가 안전 영역 밖에 있습니다.` : ''; }
+}
+function ovRow(o, i) {
+  return `<div class="ovitem${o.id === ovSel ? ' sel' : ''}" data-ov="${o.id}">
+    <b>${i}</b><span class="t">${esc(o.text.replace(/\n/g, ' '))}</span><span class="muted">${o.start.toFixed(1)}–${o.end.toFixed(1)}초</span>${safeIssue(o) ? '<span class="warn" title="안전 영역 밖">⚠</span>' : ''}</div>`;
 }
 function renderOvList() {
-  $('#ovList').innerHTML = OV.map((o, i) => `<div class="ovitem${o.id === ovSel ? ' sel' : ''}" data-ov="${o.id}">
-    <b>${i + 1}</b><span class="t">${esc(o.text.replace(/\n/g, ' '))}</span><span class="muted">${o.start.toFixed(1)}–${o.end.toFixed(1)}초</span>${safeIssue(o) ? '<span class="warn" title="안전 영역 밖">⚠</span>' : ''}</div>`).join('')
-    || '<p class="muted">아직 추가한 문구가 없습니다. 재생 위치를 정한 뒤 "+ 문구 추가"를 누르세요.</p>';
+  let html = '';
+  for (const [g, name] of Object.entries(GROUPS)) {
+    const items = OV.filter(o => o.auto === g); if (!items.length) continue;
+    const bad = items.filter(o => safeIssue(o)).length;
+    html += `<div class="ovitem${ovSel === 'g:' + g ? ' sel' : ''}" data-ov="g:${g}" style="background:var(--bg)"><b>▤</b><span class="t"><b>${name}</b> ${items.length}개 · 전체 위치·크기·색 한 번에</span>${bad ? `<span class="warn">⚠${bad}</span>` : ''}<span class="muted" data-tog="${g}">${openGroups[g] ? '접기 ▲' : '하나씩 ▼'}</span></div>`;
+    if (openGroups[g]) html += `<div style="margin-left:14px;display:flex;flex-direction:column;gap:4px">${items.map((o, i) => ovRow(o, i + 1)).join('')}</div>`;
+  }
+  const mine = OV.filter(o => !o.auto);
+  html += mine.length ? `<p class="muted" style="margin:6px 0 0">직접 추가한 문구</p>` + mine.map((o, i) => ovRow(o, i + 1)).join('')
+    : '<p class="muted" style="margin:6px 0 0">직접 추가한 문구는 없습니다. 재생 위치를 정한 뒤 "+ 문구 추가"를 누르세요.</p>';
+  $('#ovList').innerHTML = html;
   $('#ovForm').hidden = !OV.find(o => o.id === ovSel);
+  $('#grpForm').hidden = !selGroup();
 }
 function fillForm() {
+  const g = selGroup();
+  if (g) {
+    const st = AUTO_STYLE[g] || {}, first = OV.find(o => o.auto === g) || {};
+    $('#gTitle').textContent = GROUPS[g]; $('#gY').value = st.dy || 0; $('#gX').value = st.dx || 0; $('#gScale').value = st.scale || 1;
+    $('#gScaleV').textContent = Math.round((st.scale || 1) * 100) + '%';
+    $('#gColorOn').checked = 'color' in st; $('#gColor').value = st.color || first.color || '#ffffff';
+    $('#gHl').value = st.hl_color || first.hl_color || '#507aff';
+    $('#gBgOn').checked = !!(st.bg ?? first.bg); $('#gBg').value = st.bg || first.bg || '#000000'; $('#gBgOp').value = st.bg_opacity ?? first.bg_opacity ?? .6;
+    $('#gShadow').checked = st.shadow ?? first.shadow ?? true; $('#gStroke').checked = st.stroke ?? first.stroke ?? true;
+    return renderOvList();
+  }
   const o = OV.find(x => x.id === ovSel); if (!o) return renderOvList();
   $('#fText').value = o.text; $('#fStart').value = o.start; $('#fEnd').value = o.end; $('#fSize').value = o.size;
   $('#fColor').value = o.color; $('#fBgOn').checked = !!o.bg; $('#fBg').value = o.bg || '#000000'; $('#fBgOp').value = o.bg_opacity;
   $('#fShadow').checked = o.shadow; $('#fStroke').checked = o.stroke; $('#fX').value = o.x; $('#fY').value = o.y;
+  $('#fHl').value = (o.hl || []).join(', '); $('#fHlColor').value = o.hl_color || '#507aff';
+  $('#fAutoNote').hidden = $('#fGroupMoveL').hidden = !o.auto;
+  $('#fAutoNote').textContent = o.auto ? `${GROUPS[o.auto]} 중 하나입니다. 여기서 고치면 이 문구만 바뀝니다(대본을 다시 만들면 새로 생성됨).` : '';
   renderOvList();
 }
 function readForm() {
@@ -774,16 +825,40 @@ function readForm() {
   o.text = $('#fText').value; o.size = +$('#fSize').value; o.color = $('#fColor').value;
   o.bg = $('#fBgOn').checked ? $('#fBg').value : ''; o.bg_opacity = +$('#fBgOp').value;
   o.shadow = $('#fShadow').checked; o.stroke = $('#fStroke').checked; o.x = +$('#fX').value; o.y = +$('#fY').value;
+  o.hl = $('#fHl').value.split(',').map(x => x.trim()).filter(Boolean); o.hl_color = $('#fHlColor').value;
   o.start = Math.max(0, Math.min(edDur, +$('#fStart').value || 0)); o.end = Math.max(o.start + 0.1, Math.min(edDur, +$('#fEnd').value || 0));
+  if (!o.auto) { o.base_y = o.y; o.base_size = o.size; }
   drawOverlays(); renderOvList(); saveOverlaysSoon();
 }
-['#fText', '#fStart', '#fEnd', '#fSize', '#fColor', '#fBgOn', '#fBg', '#fBgOp', '#fShadow', '#fStroke', '#fX', '#fY']
+['#fText', '#fStart', '#fEnd', '#fSize', '#fColor', '#fBgOn', '#fBg', '#fBgOp', '#fShadow', '#fStroke', '#fX', '#fY', '#fHl', '#fHlColor']
   .forEach(id => $(id).addEventListener('input', readForm));
+// 그룹(자동 문구 전체) 편집: 서버의 apply_auto_style과 같은 규칙
+function applyGroup(g) {
+  const st = AUTO_STYLE[g] || {};
+  OV.filter(o => o.auto === g).forEach(o => {
+    const by = o.base_y ?? o.y, bs = o.base_size ?? o.size; o.base_y = by; o.base_size = bs;
+    if ('dy' in st) o.y = Math.min(1, Math.max(0, by + st.dy));
+    if ('dx' in st) o.x = Math.min(1, Math.max(0, .5 + st.dx));
+    if ('scale' in st) o.size = Math.round(Math.min(220, Math.max(20, bs * st.scale)));
+    for (const k of ['color', 'hl_color', 'bg', 'bg_opacity', 'shadow', 'stroke']) if (k in st) o[k] = st[k];
+  });
+}
+function readGroup() {
+  const g = selGroup(); if (!g) return;
+  const st = {dy: +$('#gY').value, dx: +$('#gX').value, scale: +$('#gScale').value, hl_color: $('#gHl').value,
+    bg: $('#gBgOn').checked ? $('#gBg').value : '', bg_opacity: +$('#gBgOp').value, shadow: $('#gShadow').checked, stroke: $('#gStroke').checked};
+  if ($('#gColorOn').checked) st.color = $('#gColor').value;
+  AUTO_STYLE[g] = st; $('#gScaleV').textContent = Math.round(st.scale * 100) + '%';
+  applyGroup(g); drawOverlays(); renderOvList(); saveOverlaysSoon();
+}
+['#gY', '#gX', '#gScale', '#gColor', '#gColorOn', '#gHl', '#gBgOn', '#gBg', '#gBgOp', '#gShadow', '#gStroke'].forEach(id => $(id).addEventListener('input', readGroup));
+$('#gReset').onclick = () => { const g = selGroup(); if (!g) return; AUTO_STYLE[g] = {dy: 0, dx: 0, scale: 1};
+  OV.filter(o => o.auto === g).forEach(o => { o.y = o.base_y; o.x = .5; o.size = o.base_size; }); fillForm(); drawOverlays(); saveOverlaysSoon(); };
 $('#fStartNow').onclick = () => { $('#fStart').value = $('#edVideo').currentTime.toFixed(1); readForm(); };
 $('#fEndNow').onclick = () => { $('#fEnd').value = $('#edVideo').currentTime.toFixed(1); readForm(); };
 function saveOverlaysSoon() {
   clearTimeout(ovSaveT);
-  ovSaveT = setTimeout(() => api(`/api/jobs/${jobId}/overlays`, {overlays: OV}).then(r => { $('#ovMsg').textContent = '저장됨 · 아직 MP4에는 반영 전입니다. "최종 영상에 적용"을 누르세요.'; }).catch(e => $('#ovMsg').textContent = e.message), 600);
+  ovSaveT = setTimeout(() => api(`/api/jobs/${jobId}/overlays`, {overlays: OV, auto_style: AUTO_STYLE}).then(r => { $('#ovMsg').textContent = '저장됨 · 아직 MP4에는 반영 전입니다. "최종 영상에 적용"을 누르세요.'; }).catch(e => $('#ovMsg').textContent = e.message), 600);
 }
 function newId() { return 'ov' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
 function addOverlay(style) {
@@ -794,7 +869,9 @@ function addOverlay(style) {
 $('#ovAdd').onclick = () => addOverlay({});
 $('#tplApply').onclick = () => { const t = TPL[+$('#tplSel').value]; if (t) addOverlay(t); };
 $('#ovDel').onclick = () => { OV = OV.filter(o => o.id !== ovSel); ovSel = null; renderOvList(); drawOverlays(); saveOverlaysSoon(); };
-$('#ovList').onclick = e => { const it = e.target.closest('[data-ov]'); if (!it) return; ovSel = it.dataset.ov;
+$('#ovList').onclick = e => {
+  const tog = e.target.closest('[data-tog]'); if (tog) { openGroups[tog.dataset.tog] = !openGroups[tog.dataset.tog]; return renderOvList(); }
+  const it = e.target.closest('[data-ov]'); if (!it) return; ovSel = it.dataset.ov;
   const o = OV.find(x => x.id === ovSel); const v = $('#edVideo'); if (o && (v.currentTime < o.start || v.currentTime > o.end)) v.currentTime = o.start + 0.05;
   fillForm(); drawOverlays(); };
 async function loadTemplates() {
@@ -816,7 +893,8 @@ $('#tplDel').onclick = async () => {
 let drag = null;
 $('#ovLayer').addEventListener('pointerdown', e => {
   const el = e.target.closest('.ov'); if (!el) return;
-  ovSel = el.dataset.id; drag = {el, o: OV.find(x => x.id === ovSel)}; el.setPointerCapture(e.pointerId);
+  ovSel = el.dataset.id; const o0 = OV.find(x => x.id === ovSel);
+  drag = {el, o: o0, group: o0.auto && $('#fGroupMove').checked ? o0.auto : null}; el.setPointerCapture(e.pointerId);
   document.querySelectorAll('.ov').forEach(x => x.classList.toggle('sel', x === el)); fillForm();
 });
 $('#ovLayer').addEventListener('pointermove', e => {
@@ -824,8 +902,13 @@ $('#ovLayer').addEventListener('pointermove', e => {
   drag.o.x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)); drag.o.y = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
   drag.el.style.left = drag.o.x * 100 + '%'; drag.el.style.top = drag.o.y * 100 + '%';
   $('#fX').value = drag.o.x; $('#fY').value = drag.o.y; $('#fWarn').textContent = safeIssue(drag.o);
+  if (drag.group) {  // 같은 종류 전체를 같은 만큼 이동
+    const st = AUTO_STYLE[drag.group] = {...(AUTO_STYLE[drag.group] || {})};
+    st.dy = +(drag.o.y - (drag.o.base_y ?? drag.o.y)).toFixed(4); st.dx = +(drag.o.x - .5).toFixed(4);
+    applyGroup(drag.group);
+  }
 });
-$('#ovLayer').addEventListener('pointerup', () => { if (drag) { drag = null; renderOvList(); saveOverlaysSoon(); } });
+$('#ovLayer').addEventListener('pointerup', () => { if (drag) { const g = drag.group; drag = null; if (g) drawOverlays(); renderOvList(); saveOverlaysSoon(); } });
 // 재생·탐색
 const edV = $('#edVideo');
 ['timeupdate', 'seeked', 'loadedmetadata'].forEach(ev => edV.addEventListener(ev, drawOverlays));
@@ -836,7 +919,7 @@ $('#edSeek').oninput = e => { edV.currentTime = +e.target.value; };
 window.addEventListener('resize', drawOverlays);
 $('#safeSel').onchange = () => { renderSafe($('#safeLayer')); renderSafe($('#thSafe')); drawThumbGuides(); drawOverlays(); renderOvList(); };
 $('#ovApply').onclick = async () => {
-  try { clearTimeout(ovSaveT); await api(`/api/jobs/${jobId}/apply_overlays`, {overlays: OV}); $('#ovMsg').textContent = '합성 중… (음성·대본은 그대로, 문구만 다시 합성)'; open(jobId); }
+  try { clearTimeout(ovSaveT); await api(`/api/jobs/${jobId}/apply_overlays`, {overlays: OV, auto_style: AUTO_STYLE}); $('#ovMsg').textContent = '합성 중… (음성·대본은 그대로, 문구만 다시 합성)'; open(jobId); }
   catch (e) { alert(e.message); }
 };
 // 탭
@@ -848,7 +931,7 @@ document.querySelectorAll('.tabs [data-tab]').forEach(b => b.onclick = () => {
 });
 async function initEditor(j) {
   curJob = j; $('#editCard').hidden = false;
-  const key = j.id + j.result.seconds + (j.result.base_url || '');
+  const key = j.id + (j.result.render_id || j.result.seconds);
   renderOutputs(j);
   const fv = j.result.video_url + '?t=' + (j.result.edited_at || j.result.seconds);
   if ($('#finalVideo').dataset.src !== fv) { $('#finalVideo').src = fv; $('#finalVideo').dataset.src = fv; }
@@ -856,7 +939,8 @@ async function initEditor(j) {
   if (key === edKey) return; edKey = key;
   if (!TPL.length) await loadTemplates();
   edDur = j.result.seconds; $('#edSeek').max = edDur;
-  edV.src = j.result.base_url; OV = (j.overlays || []).map(o => ({...o})); ovSel = null;
+  edV.src = j.result.base_url + '?r=' + (j.result.render_id || ''); OV = (j.overlays || []).map(o => ({...o})); ovSel = null;
+  AUTO_STYLE = JSON.parse(JSON.stringify(j.auto_style || {}));
   renderSafe($('#safeLayer')); renderSafe($('#thSafe')); renderOvList(); drawOverlays();
   thLoadedFor = '';
 }
@@ -893,8 +977,8 @@ function loadThumbSpec(s) {
 function selectThumb(t) {
   thTime = t; $('#thTimeLbl').textContent = `선택: ${t}초`;
   document.querySelectorAll('#thStrip .fr, #thRecos .reco').forEach(el => el.classList.toggle('sel', +el.dataset.t === t));
-  if ($('#thFull').checked) {  // 자막 포함: 기본 영상에서 해당 시점을 잡아 그림
-    const v = edV; const done = () => { const c = document.createElement('canvas'); c.width = 1080; c.height = 1920;
+  if ($('#thFull').checked) {  // 자막 포함: 문구가 합성된 최종본에서 해당 시점을 잡아 그림
+    const v = $('#finalVideo'); const done = () => { const c = document.createElement('canvas'); c.width = 1080; c.height = 1920;
       c.getContext('2d').drawImage(v, 0, 0, 1080, 1920); thImg = c; drawThumb(); };
     v.pause(); v.currentTime = t + 0.01; v.addEventListener('seeked', done, {once: true});
   } else {

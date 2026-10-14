@@ -22,7 +22,10 @@ from .render import FPS, H, W, font
 TEMPLATES_FILE = OUTPUT_DIR / "text_templates.json"
 
 DEFAULT_STYLE = {"text": "문구를 입력하세요", "size": 72, "color": "#ffffff", "bg": "", "bg_opacity": 0.85,
-                 "shadow": True, "stroke": True, "x": 0.5, "y": 0.3, "start": 0.0, "end": 3.0}
+                 "shadow": True, "stroke": True, "x": 0.5, "y": 0.3, "start": 0.0, "end": 3.0,
+                 # 자동으로 만든 문구: auto = "sub"(자막) | "label"(상단·엔딩 문구) | ""(직접 추가). hl = 강조 단어
+                 "auto": "", "hl": [], "hl_color": "", "base_y": None, "base_size": None}
+AUTO_GROUPS = {"sub": "자동 자막", "label": "자동 상단·엔딩 문구"}
 
 BUILTIN_TEMPLATES = [
     {"name": "노란 강조 박스", "text": "부분 보수로 비용 절감!", "size": 76, "color": "#111111", "bg": "#F6C10A",
@@ -60,7 +63,31 @@ def clean_overlay(o: dict, duration: float) -> dict:
         out[k] = v if (v == "" and k == "bg") or (v.startswith("#") and len(v) in (4, 7)) else DEFAULT_STYLE[k]
     out["shadow"] = bool(out["shadow"])
     out["stroke"] = bool(out["stroke"])
+    out["auto"] = out["auto"] if out["auto"] in AUTO_GROUPS else ""
+    out["hl"] = [str(h)[:20] for h in (out["hl"] or []) if str(h).strip()][:5]
+    hc = str(out["hl_color"] or "")
+    out["hl_color"] = hc if hc.startswith("#") and len(hc) in (4, 7) else ""
+    out["base_y"] = out["y"] if out["base_y"] is None else round(float(out["base_y"]), 4)
+    out["base_size"] = out["size"] if out["base_size"] is None else int(out["base_size"])
     return out
+
+
+def apply_auto_style(o: dict, style: dict) -> dict:
+    """그룹 설정(위치 이동·크기 비율·색 등)을 자동 문구 하나에 적용."""
+    st = (style or {}).get(o.get("auto"), {})
+    if not st:
+        return o
+    o = dict(o)
+    if "dy" in st:
+        o["y"] = round(min(1.0, max(0.0, o["base_y"] + float(st["dy"]))), 4)
+    if "dx" in st:
+        o["x"] = round(min(1.0, max(0.0, 0.5 + float(st["dx"]))), 4)
+    if "scale" in st:
+        o["size"] = int(min(220, max(20, o["base_size"] * float(st["scale"]))))
+    for k in ("color", "hl_color", "bg", "bg_opacity", "shadow", "stroke"):
+        if k in st:
+            o[k] = st[k]
+    return o
 
 
 def _rgb(hexs):
@@ -89,11 +116,17 @@ def text_box(o: dict) -> Image.Image:
     txt = Image.new("RGBA", img.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(txt)
     color = _rgb(o["color"]) + (255,)
+    hl_col = _rgb(o["hl_color"]) + (255,) if o.get("hl_color") else color
+    hls = o.get("hl") or []
     y = margin + pady + stroke
     for line, lw in zip(lines, widths):
         x = margin + (bw - lw) / 2
-        d.text((x, y + (lh - size) / 2 - size * 0.08), line, font=f, fill=color,
-               stroke_width=stroke, stroke_fill=(10, 10, 12, 255))
+        words = line.split(" ")
+        for wi, word in enumerate(words):  # 강조 단어만 다른 색
+            c = hl_col if any(h in word for h in hls) else color
+            d.text((x, y + (lh - size) / 2 - size * 0.08), word, font=f, fill=c,
+                   stroke_width=stroke, stroke_fill=(10, 10, 12, 255))
+            x += f.getlength(word + (" " if wi < len(words) - 1 else ""))
         y += lh
     if o["shadow"]:
         sh = Image.new("RGBA", img.size, (0, 0, 0, 0))
@@ -111,29 +144,44 @@ def placed(o: dict):
     return img, (int(o["x"] * W - img.width / 2), int(o["y"] * H - img.height / 2))
 
 
-def compose(base: Path, overlays: list, out: Path, log=print) -> Path:
+def compose(base: Path, overlays: list, out: Path, log=print, progress=None) -> Path:
     """기본 영상 위에 문구를 시간대별로 합성. 문구가 없으면 그대로 복사."""
     if not overlays:
         shutil.copyfile(base, out)
         return out
-    d = out.parent / "overlays"
-    d.mkdir(exist_ok=True)
-    inputs, chain, last = [], [], "[0:v]"
-    for i, o in enumerate(overlays):
-        img, (x, y) = placed(o)
-        p = d / f"ov_{i}.png"
-        img.save(p)
-        inputs += ["-loop", "1", "-i", str(p)]
-        nxt = f"[v{i}]"
-        chain.append(f"{last}[{i + 1}:v]overlay={x}:{y}:enable='between(t,{o['start']},{o['end']})':shortest=1{nxt}")
-        last = nxt
+    layers = [(o["start"], o["end"]) + placed(o) for o in overlays]  # 문구 그림은 한 번만 만든다
     tmp = out.with_suffix(".tmp.mp4")
-    cmd = [ffmpeg_exe(), "-v", "error", "-y", "-i", str(base)] + inputs + [
-        "-filter_complex", ";".join(chain), "-map", last, "-map", "0:a?", "-c:v", "libx264", "-preset", "medium",
-        "-crf", "19", "-pix_fmt", "yuv420p", "-r", str(FPS), "-c:a", "copy", "-movflags", "+faststart", str(tmp)]
-    subprocess.run(cmd, check=True)
+    dec = subprocess.Popen([ffmpeg_exe(), "-v", "error", "-i", str(base), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                           stdout=subprocess.PIPE)
+    enc = subprocess.Popen([ffmpeg_exe(), "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
+                            "-r", str(FPS), "-i", "-", "-i", str(base), "-map", "0:v", "-map", "1:a?", "-c:v", "libx264",
+                            "-preset", "medium", "-crf", "19", "-pix_fmt", "yuv420p", "-c:a", "copy",
+                            "-movflags", "+faststart", str(tmp)], stdin=subprocess.PIPE)
+    size, n = W * H * 3, 0
+    try:
+        while True:
+            buf = dec.stdout.read(size)
+            if len(buf) < size:
+                break
+            t = n / FPS
+            active = [(img, pos) for s, e, img, pos in layers if s <= t <= e]
+            if active:
+                fr = Image.frombytes("RGB", (W, H), buf)
+                for img, pos in active:
+                    fr.paste(img, pos, img)
+                buf = fr.tobytes()
+            enc.stdin.write(buf)
+            n += 1
+            if progress and n % 30 == 0:
+                progress(n)
+        enc.stdin.close()
+        if enc.wait() != 0:
+            raise RuntimeError("문구 합성 인코딩 실패")
+    finally:
+        dec.kill()
+        dec.wait()
     tmp.replace(out)
-    log(f"추가 문구 {len(overlays)}개 합성 완료")
+    log(f"문구 {len(overlays)}개 합성 완료")
     return out
 
 
@@ -145,12 +193,12 @@ def frame_at(job_dir: Path, t: float, clean=True) -> Path:
     p = frames / f"clean_{sec:03d}.jpg"
     if clean and p.exists():
         return p
-    src = job_dir / "reel_base.mp4"
+    src = job_dir / "reel.mp4"  # 문구가 들어간 최종본에서 잡는다
     if not src.exists():
-        src = job_dir / "reel.mp4"
+        src = job_dir / "reel_base.mp4"
     frames.mkdir(exist_ok=True)
     out = frames / f"full_{t:07.2f}.jpg"
-    if not out.exists():
+    if not out.exists() or out.stat().st_mtime < src.stat().st_mtime:
         subprocess.run([ffmpeg_exe(), "-v", "error", "-y", "-ss", f"{t:.2f}", "-i", str(src), "-frames:v", "1",
                         "-q:v", "2", str(out)], check=True)
     return out

@@ -175,39 +175,6 @@ class ClipPanel:
         self.proc.wait()
 
 
-def plan_panels(scenes, durs):
-    """장면 길이에 맞게 사진을 컷으로 배분. 사진이 많으면 2장씩 묶고, 넘치면 다음 장면으로 넘긴다."""
-    carry, last, shown = [], [], set()
-    plans = []  # 장면별 [(파일들, 상세컷 여부)]
-    for s, d in zip(scenes, durs):
-        if s["kind"] == "cta":
-            plans.append([])
-            continue
-        if (s.get("clip") or {}).get("file"):  # 보조 영상 장면: 이 장면 사진은 다음 장면으로 넘겨 빠지지 않게
-            plans.append([((s["clip"]["file"],), "clip")])
-            carry = list(dict.fromkeys(carry + [im["file"] for im in s.get("images", []) if im.get("file")]))
-            continue
-        own = [im["file"] for im in s.get("images", []) if im.get("file")]
-        if s.get("reused") and carry:
-            own = []
-        imgs = list(dict.fromkeys(carry + own))
-        if not imgs:
-            imgs = last[-1:] or []
-        slots = max(1, int(d // MIN_PANEL_SEC))
-        panels, i = [], 0
-        while i < len(imgs) and len(panels) < slots:
-            take = 2 if (len(imgs) - i) > (slots - len(panels)) else 1
-            group = imgs[i:i + take]
-            panels.append((group, all(f in shown for f in group)))
-            shown.update(group)
-            i += take
-        carry = imgs[i:]
-        plans.append(panels)
-        if panels:
-            last = panels[-1][0]
-    return plans, shown
-
-
 # ---------- 오디오 ----------
 def _concat_wavs(items, out_path, total_frames_sec):
     """[(wav, 시작초)] → 하나의 48k 모노 wav."""
@@ -289,31 +256,41 @@ def render(script, work: Path, settings, log=print, progress=lambda p, m="": Non
         f"{i}\n{_srt_time(c['start'])} --> {_srt_time(c['end'])}\n" + "\n".join(c["lines"]) + "\n\n"
         for i, c in enumerate(cues, 1)), encoding="utf-8")
 
-    focus_map = {im["file"]: im.get("focus") for s in scenes for im in s.get("images", []) if im.get("file")}
+    # 3) 사진: 본문 사진 전부를 순서대로 한 장씩, 한 번씩만(2장 묶음·같은 사진 반복 없음)
+    order, seen = [], set()
+    for im in [im for s in scenes if s["kind"] != "cta" and not (s.get("clip") or {}).get("file")
+               for im in s.get("images", [])] + list(script.get("all_images") or []):
+        if im.get("file") and im["file"] not in seen:
+            seen.add(im["file"])
+            order.append(im)
+    focus_map = {im["file"]: im.get("focus") for im in order}
+    photo_iv = []  # 사진을 보여 줄 구간(엔딩·보조 영상 장면 제외)
+    for i, s in enumerate(scenes):
+        if s["kind"] != "cta" and not (s.get("clip") or {}).get("file"):
+            photo_iv.append((i, starts[i], starts[i] + durs[i]))
+    photo_total = sum(e - b for _, b, e in photo_iv)
+    slot = photo_total / len(order) if order else 0
+    cum, acc = {}, 0.0
+    for i, b, e in photo_iv:
+        cum[i] = acc
+        acc += e - b
+    if not order:
+        warnings.append("영상에 넣을 사진이 없습니다.")
+    elif slot < 0.8:
+        warnings.append(f"사진 {len(order)}장이 영상 길이에 비해 많아 한 장당 {slot:.1f}초씩만 보입니다.")
+    shown = {im["file"] for im in order}
+    all_imgs = shown
 
-    # 3) 사진 컷 배분
-    plans, shown = plan_panels(scenes, durs)
-    all_imgs = {im["file"] for s in scenes for im in s.get("images", []) if im.get("file")}
-    if len(shown) < len(all_imgs):
-        warnings.append(f"사진 {len(all_imgs)}장 중 {len(shown)}장만 영상에 들어갔습니다(길이 대비 사진이 많음).")
-
-    # 4) 정적 레이어 미리 그리기
+    # 4) 배경과 엔딩(로고) 화면. 글자(상단 문구·자막·엔딩 문구)는 편집 가능한 문구로 따로 만든다.
     bg = Image.new("RGB", (1, 256))
     for y in range(256):
         a = y / 255
         bg.putpixel((0, y), tuple(int(th["bg_top"][i] * (1 - a) + th["bg_bottom"][i] * a) for i in range(3)))
     bg = bg.resize((W, H), Image.BILINEAR).convert("RGBA")
-
-    def color_fn(hls):
-        return lambda w: hl if any(h and h in w for h in hls) else (255, 255, 255)
-
-    sub_layers = [_shadowed_text_layer(c["lines"], 92, color_fn(c["hl"])) for c in cues]
     scene_bases = []
     for i, s in enumerate(scenes):
         base = bg.copy()
         if s["kind"] == "cta":
-            hdr = _shadowed_text_layer([script.get("end_header") or settings["brand_name"]], 64, lambda w: (255, 255, 255))
-            _paste_center(base, hdr, W / 2, 400)
             ImageDraw.Draw(base).rectangle((0, 560, W, 1360), fill=(0, 0, 0, 255))
             logo_p = Path(settings["logo"])
             if logo_p.exists():
@@ -323,14 +300,33 @@ def render(script, work: Path, settings, log=print, progress=lambda p, m="": Non
             else:
                 _paste_center(base, _shadowed_text_layer([settings["brand_name"]], 110, lambda w: (255, 255, 255)), W / 2, 960)
         scene_bases.append(base.convert("RGB"))
-    label_layers = []
-    for i, s in enumerate(scenes):
-        if s["kind"] == "cta" or not s.get("label"):
-            label_layers.append(None)
-        elif i == 0:
-            label_layers.append(_shadowed_text_layer([s["label"]], 84, lambda w: title_col, stroke=5))
+
+    def hexc(c):
+        return "#%02x%02x%02x" % tuple(c)
+
+    def fit(text, size, max_w=1000):
+        while size > 30 and font(size).getlength(text) > max_w:
+            size -= 2
+        return size
+
+    auto = []
+    for i, (s, st, d) in enumerate(zip(scenes, starts, durs)):
+        if s["kind"] == "cta":
+            txt, size, col, y = script.get("end_header") or settings["brand_name"], 64, "#ffffff", 400
+        elif s.get("label"):
+            txt, size, col, y = s["label"], 84 if i == 0 else 60, hexc(title_col) if i == 0 else "#ffffff", LABEL_Y
         else:
-            label_layers.append(_shadowed_text_layer([s["label"]], 60, lambda w: (255, 255, 255), stroke=4))
+            continue
+        size = fit(txt, size)
+        auto.append({"id": f"auto_lab{i}", "auto": "label", "text": txt, "start": round(st, 2), "end": round(st + d, 2),
+                     "size": size, "base_size": size, "color": col, "bg": "", "shadow": True, "stroke": True,
+                     "x": 0.5, "y": round(y / H, 4), "base_y": round(y / H, 4), "hl": [], "hl_color": ""})
+    sub_y = round((SUB_Y[0] + SUB_Y[1]) / 2 / H, 4)
+    for j, c in enumerate(cues):
+        auto.append({"id": f"auto_sub{j}", "auto": "sub", "text": "\n".join(c["lines"]),
+                     "start": round(c["start"], 2), "end": round(c["end"], 2), "size": 92, "base_size": 92,
+                     "color": "#ffffff", "bg": "", "shadow": True, "stroke": True, "x": 0.5, "y": sub_y, "base_y": sub_y,
+                     "hl": [h for h in c["hl"] if h], "hl_color": hexc(hl)})
 
     # 5) 프레임 → ffmpeg
     out_mp4 = work / "reel_base.mp4"  # 추가 문구 없는 기본 영상(문구는 editing.compose로 따로 합성)
@@ -354,35 +350,29 @@ def render(script, work: Path, settings, log=print, progress=lambda p, m="": Non
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
 
     panel_cache = {}
-    ci = 0
     try:
         for fi in range(n_frames):
             t = fi / FPS
             si = max(i for i, st in enumerate(starts) if st <= t + 1e-6)
             frame = scene_bases[si].copy()
-            panels = plans[si]
-            if panels:
-                local = (t - starts[si]) / durs[si]
-                pi = min(len(panels) - 1, int(local * len(panels)))
-                key = (si, pi)
+            s = scenes[si]
+            key, make, prog = None, None, 0.0
+            if (s.get("clip") or {}).get("file"):
+                key, make = ("clip", si), (lambda: ClipPanel(s["clip"]["file"]))
+            elif si in cum and order:
+                el = cum[si] + (t - starts[si])
+                k = min(len(order) - 1, int(el / slot))
+                prog = min(1.0, (el - k * slot) / slot)
+                key, make = ("photo", k), (lambda k=k: Panel([order[k]["file"]], k, False, focus_map))
+            if key is not None:
                 if key not in panel_cache:
                     for old in panel_cache.values():
                         getattr(old, "close", lambda: None)()
                     panel_cache.clear()
-                    files, detail = panels[pi]
-                    panel_cache[key] = (ClipPanel(files[0]) if detail == "clip"
-                                        else Panel(files, si * 3 + pi, detail, focus_map))
-                panel_cache[key].draw(frame, local * len(panels) - pi)
-            if fi % FPS == 0:  # 썸네일·타임라인용: 자막·라벨이 없는 깨끗한 프레임을 1초마다 저장
+                    panel_cache[key] = make()
+                panel_cache[key].draw(frame, prog)
+            if fi % FPS == 0:  # 썸네일·타임라인용 프레임(글자 없음)을 1초마다 저장
                 frame.save(frames_dir / f"clean_{fi // FPS:03d}.jpg", quality=88)
-            if label_layers[si] is not None:
-                _paste_center(frame, label_layers[si], W / 2, LABEL_Y)
-            while ci < len(cues) - 1 and t >= cues[ci].get("end", 0):
-                ci += 1
-            if cues[ci]["start"] <= t < cues[ci]["end"] + 1e-6:
-                lay = sub_layers[ci]
-                cy = (SUB_Y[0] + SUB_Y[1]) / 2 if len(cues[ci]["lines"]) == 2 else SUB_Y[0] + 50
-                _paste_center(frame, lay, W / 2, cy)
             proc.stdin.write(frame.tobytes())
             if fi % 15 == 0:
                 progress(30 + 68 * fi / n_frames, f"영상 합성 {fi}/{n_frames} 프레임")
@@ -399,7 +389,8 @@ def render(script, work: Path, settings, log=print, progress=lambda p, m="": Non
     progress(100, "완료")
     timeline = [{"start": round(st, 2), "end": round(st + d, 2), "role": s.get("role", ""), "kind": s["kind"],
                  "label": s.get("label", "")} for s, st, d in zip(scenes, starts, durs)]
-    return {"video": str(out_mp4), "base_video": str(out_mp4), "timeline": timeline,
+    return {"video": str(out_mp4), "base_video": str(out_mp4), "timeline": timeline, "auto_overlays": auto,
+            "photo_seconds": round(slot, 2),
             "srt": str(work / "subtitles.srt"), "seconds": round(total, 2),
             "tts_engines": sorted(engines), "tts_usage": tts_usage,
             "clips_used": [s["clip"] for s in scenes if (s.get("clip") or {}).get("file")], "images_used": len(shown), "images_total": len(all_imgs),

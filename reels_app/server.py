@@ -212,9 +212,9 @@ class Handler(BaseHTTPRequestHandler):
                                      bool(body.get("auto_stock")), bool(body.get("approved")))
                     return self._json({"ok": True})
                 if action == "overlays":
-                    return self._json({"overlays": job.save_overlays(body.get("overlays") or [])})
+                    return self._json({"overlays": job.save_overlays(body.get("overlays") or [], body.get("auto_style"))})
                 if action == "apply_overlays":
-                    job.save_overlays(body.get("overlays") or job.state.get("overlays", []))
+                    job.save_overlays(body.get("overlays") or job.state.get("overlays", []), body.get("auto_style"))
                     job.start_apply_overlays()
                     return self._json({"ok": True})
                 if action == "thumbnail":

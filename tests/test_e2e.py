@@ -81,6 +81,9 @@ def main():
     for w in r["warnings"]:
         print("주의:", w)
     assert 40 <= dur <= 60.5, dur
+    assert r["images_used"] == n_imgs and r["photo_seconds"] > 0  # 본문 사진 전부를 한 장씩 한 번
+    ovs = job.state["overlays"]
+    assert any(o["auto"] == "sub" for o in ovs) and any(o["auto"] == "label" for o in ovs)  # 자동 문구도 편집 가능
     print("E2E OK")
     srv.shutdown()
 
