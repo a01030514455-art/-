@@ -1,0 +1,89 @@
+"""한국어 음성 합성(무료).
+
+- edge: Microsoft Edge 읽어주기 음성(edge-tts). 무료·API 키 불필요, 인터넷 연결 필요. 품질 가장 좋음.
+- local: 완전 오프라인. Windows는 내장 한국어 음성(SAPI, pyttsx3), 그 외에는 espeak-ng(음질 낮음).
+- auto: edge를 먼저 시도하고 실패하면 local.
+같은 문장은 해시로 캐시해서 다시 만들지 않는다.
+"""
+import asyncio
+import hashlib
+import shutil
+import subprocess
+from pathlib import Path
+
+from .config import IS_WINDOWS
+
+_edge_down = False
+
+
+def duration(path) -> float:
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+                         capture_output=True, text=True, check=True).stdout.strip()
+    return float(out)
+
+
+def _to_wav(src: Path, dst: Path):
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-ac", "1", "-ar", "48000",
+                    "-af", "silenceremove=start_periods=1:start_threshold=-50dB,areverse,"
+                           "silenceremove=start_periods=1:start_threshold=-50dB,areverse",
+                    str(dst)], check=True)
+
+
+def _edge(text, voice, rate, out_mp3: Path):
+    import edge_tts
+
+    async def run():
+        await edge_tts.Communicate(text, voice, rate=rate).save(str(out_mp3))
+    asyncio.run(run())
+
+
+def _local(text, out_raw: Path):
+    if IS_WINDOWS:
+        import pyttsx3
+        eng = pyttsx3.init()
+        for v in eng.getProperty("voices"):
+            if "ko" in (v.id + v.name).lower() or "korean" in v.name.lower() or "heami" in v.name.lower():
+                eng.setProperty("voice", v.id)
+                break
+        eng.setProperty("rate", 190)
+        eng.save_to_file(text, str(out_raw))
+        eng.runAndWait()
+        return
+    exe = shutil.which("espeak-ng") or shutil.which("espeak")
+    if not exe:
+        raise RuntimeError("오프라인 음성 엔진이 없습니다(espeak-ng 설치 필요).")
+    subprocess.run([exe, "-v", "ko", "-s", "185", "-w", str(out_raw), text], check=True)
+
+
+def synth(text: str, out_dir: Path, settings: dict, log=print) -> dict:
+    """문장 하나를 wav로 만든다. 반환: {file, seconds, engine}."""
+    global _edge_down
+    out_dir.mkdir(parents=True, exist_ok=True)
+    engine = settings.get("tts_engine", "auto")
+    key = hashlib.sha1(f"{engine}|{settings['tts_voice']}|{settings['tts_rate']}|{text}".encode()).hexdigest()[:16]
+    wav = out_dir / f"{key}.wav"
+    meta = out_dir / f"{key}.engine"
+    if wav.exists() and meta.exists():
+        return {"file": str(wav), "seconds": duration(wav), "engine": meta.read_text()}
+
+    errors = []
+    order = {"auto": ["edge", "local"], "edge": ["edge"], "local": ["local"]}[engine]
+    if engine == "auto" and _edge_down:
+        order = ["local"]
+    for eng in order:
+        raw = out_dir / f"{key}.{eng}.{'mp3' if eng == 'edge' else 'wav'}"
+        try:
+            if eng == "edge":
+                _edge(text, settings["tts_voice"], settings["tts_rate"], raw)
+            else:
+                _local(text, raw)
+            _to_wav(raw, wav)
+            raw.unlink(missing_ok=True)
+            meta.write_text(eng)
+            return {"file": str(wav), "seconds": duration(wav), "engine": eng}
+        except Exception as e:
+            if eng == "edge":
+                _edge_down = True  # 같은 실행 중에는 다시 기다리지 않음(앱 재시작 시 다시 시도)
+            errors.append(f"{eng}: {str(e).splitlines()[0] if str(e) else type(e).__name__}")
+            log(f"음성 엔진 {eng} 실패 → {errors[-1]}")
+    raise RuntimeError("음성 합성 실패: " + " / ".join(errors))

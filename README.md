@@ -1,0 +1,76 @@
+# 블로그 릴스 메이커
+
+네이버 블로그 글 링크 하나를 넣으면 PC에서 릴스/쇼츠 영상을 만들어 주는 웹앱입니다.
+
+- 출력: 9:16 세로, 1080×1920, 30fps, MP4(H.264 + AAC)
+- 처리 순서: 본문·사진 추출 → 한국어 대본·자막 작성 → 무료 AI 음성 → 사진 움직임 합성
+- 비용: 기본 설정은 **0원**입니다. 외부 서버 없이 내 PC에서 돌아가며, 유료 API는 직접 승인했을 때만 호출합니다.
+
+## 실행 방법
+
+### Windows
+1. [Python 3.10 이상](https://www.python.org/downloads/)을 설치합니다. 설치할 때 "Add to PATH"를 체크하세요.
+2. FFmpeg를 설치합니다. PowerShell에서 `winget install --id Gyan.FFmpeg`를 실행하세요.
+3. `run_windows.bat`를 더블클릭하면 브라우저에 `http://127.0.0.1:8765`가 열립니다.
+   - 브라우저 자동화는 PC에 기본 설치된 Edge를 씁니다. 추가 다운로드는 없습니다.
+
+### macOS / Linux
+```bash
+./run_mac_linux.sh        # 처음 한 번은 필요한 패키지를 자동으로 설치합니다
+```
+
+### 사용 순서
+1. 블로그 글 주소를 넣고 **글·사진 가져오기**를 누릅니다.
+2. 추출 결과를 확인합니다: 제목, 본문 성공 여부, 사진 발견/다운로드 개수, 읽지 못한 부분과 원인.
+3. 장면별 대본·상단 문구·강조 단어·사진 번호를 필요하면 고치고 **수정 저장**을 누릅니다.
+4. **영상 만들기**를 누르면 진행률이 표시되고, 끝나면 화면에서 바로 재생하거나 내려받을 수 있습니다.
+
+명령줄로도 실행할 수 있습니다: `python -m reels_app "https://blog.naver.com/아이디/글번호"`
+
+## 결과물 위치
+- `extracted_images/<블로그ID>_<글번호>/`: 본문 사진 원본(순서대로 001, 002…)과 `post.json`(제목·본문·사진 설명)
+- `output/<작업ID>/reel.mp4`: 완성 영상. 같은 폴더에 `subtitles.srt`(자막), `narration.wav`(내레이션), `job.json`(작업 기록·비용)
+
+## 비용 구조
+| 단계 | 방식 | 비용 |
+|---|---|---|
+| 글·사진 추출 | Playwright(브라우저 자동화) | 무료 |
+| 대본·자막 | 규칙 기반(본문 문장 선택 + 레퍼런스 말투로 다듬기) | 무료, AI 호출 없음 |
+| 음성 | Edge 무료 한국어 음성(SunHi) → 실패하면 PC 내장 음성 | 무료, API 키 불필요 |
+| 영상 합성 | Python(Pillow) + FFmpeg | 무료 |
+| (선택) AI 대본 | Claude Haiku 5.5, 1편당 1회 호출, 사진은 보내지 않음 | 예상 약 $0.001~0.002(약 2~3원) |
+
+- AI 대본은 화면의 **AI로 다시 쓰기(유료)** 버튼을 눌러 예상 토큰·비용을 확인하고 승인했을 때만 실행됩니다.
+- 실제 사용량은 "이번 영상 비용" 칸과 `job.json`에 기록됩니다.
+- AI를 쓰려면 `pip install anthropic`을 설치하고 환경변수 `ANTHROPIC_API_KEY`를 설정해야 합니다.
+
+## 설정 (`settings.json`, 선택)
+프로젝트 폴더에 `settings.json`을 만들면 기본값을 바꿀 수 있습니다. 전체 항목은 `reels_app/config.py`에 있습니다.
+```json
+{
+  "brand_name": "가온집수리",
+  "cta_text": "전문가에게 상담받아 보세요.",
+  "cta_highlight": "상담받아",
+  "theme": "dark_blue",
+  "tts_voice": "ko-KR-SunHiNeural",
+  "target_seconds": 48
+}
+```
+- 로고: `reels_app/assets/logo.png` (레퍼런스 엔딩에서 추출한 가온 로고)
+- 배경음악: `reels_app/assets/bgm.mp3`를 넣으면 작게 깔립니다. 저작권 없는 음원만 쓰세요.
+- 스타일 근거: [docs/STYLE_GUIDE.md](docs/STYLE_GUIDE.md)
+
+## 지키는 원칙
+- 공개 글만 읽습니다. 로그인·비공개·서로이웃·삭제·접근 제한 글은 우회하지 않고 원인을 그대로 보고합니다.
+- 프로필 사진, 스티커, 이모티콘, 링크 미리보기, 지도, 아이콘 크기 이미지는 본문 사진에서 제외합니다.
+- 추출에 실패하면 성공으로 표시하지 않습니다. 실패한 사진은 하나씩 오류 원인을 남깁니다.
+
+## 테스트
+```bash
+python tests/test_e2e.py --tts local   # 네이버 구조를 흉내 낸 로컬 페이지로 추출→대본→음성→영상 전 과정 검증
+```
+
+## 문제 해결
+- **"페이지 접속 실패: net::ERR_TUNNEL_CONNECTION_FAILED / ERR_NAME_NOT_RESOLVED"**: 이 PC나 네트워크가 `blog.naver.com`, `m.blog.naver.com`, `*.pstatic.net` 접속을 막고 있습니다(회사 방화벽, 클라우드 샌드박스 등).
+- **음성이 기계음**: Edge 음성 서버(`speech.platform.bing.com`)에 연결되지 않아 오프라인 음성으로 바뀐 경우입니다. 인터넷 연결을 확인하세요.
+- **브라우저 실행 실패**: `python -m playwright install chromium`을 실행하거나, `settings.json`의 `"browser_executable"`에 크롬 경로를 넣으세요.

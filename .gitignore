@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+output/
+extracted_images/
+settings.local.json
+.venv/

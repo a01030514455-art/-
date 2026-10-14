@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>블로그 릴스 메이커</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--ink:#16181d;--sub:#5b6170;--line:#e3e5ea;--accent:#507aff;--ok:#1a9c5b;--bad:#d64545;--warn:#b7791f}
+@media (prefers-color-scheme:dark){:root{--bg:#111214;--card:#1c1d21;--ink:#eceef2;--sub:#9aa0ad;--line:#2c2e34}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif}
+main{max-width:1080px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:22px;margin:4px 0 16px}h2{font-size:16px;margin:0 0 12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input,textarea,select{font:inherit;color:inherit;background:transparent;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+input[type=url]{flex:1;min-width:240px}textarea{width:100%;resize:vertical}
+button{font:inherit;border:0;border-radius:8px;padding:9px 16px;background:var(--accent);color:#fff;cursor:pointer;font-weight:600}
+button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}button:disabled{opacity:.45;cursor:default}
+.bar{height:10px;background:var(--line);border-radius:6px;overflow:hidden}.bar>i{display:block;height:100%;background:var(--accent);width:0;transition:width .4s}
+.muted{color:var(--sub);font-size:13px}.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.stat{border:1px solid var(--line);border-radius:10px;padding:10px}.stat b{display:block;font-size:20px}
+.scene{display:grid;grid-template-columns:140px 1fr;gap:12px;border-top:1px solid var(--line);padding:12px 0}
+.thumbs{display:flex;flex-wrap:wrap;gap:4px}.thumbs img{width:66px;height:66px;object-fit:cover;border-radius:6px}
+.scene label{display:block;font-size:12px;color:var(--sub);margin:4px 0 2px}.scene input{width:100%}
+pre{white-space:pre-wrap;font-size:12px;max-height:220px;overflow:auto;background:var(--bg);padding:10px;border-radius:8px;margin:8px 0 0}
+video{display:block;width:100%;max-width:340px;aspect-ratio:9/16;margin:0 auto;border-radius:12px;background:#000}
+.layout{display:grid;grid-template-columns:1fr 380px;gap:14px}@media (max-width:860px){.layout{grid-template-columns:1fr}.scene{grid-template-columns:1fr}}
+.pill{display:inline-block;padding:2px 8px;border-radius:99px;border:1px solid var(--line);font-size:12px}
+a{color:var(--accent)}
+</style>
+</head>
+<body>
+<main>
+  <h1>블로그 릴스 메이커 <span class="muted">네이버 블로그 링크 → 9:16 FHD 30fps MP4</span></h1>
+
+  <section class="card">
+    <div class="row">
+      <input id="url" type="url" placeholder="https://blog.naver.com/아이디/글번호">
+      <button id="go">글·사진 가져오기</button>
+    </div>
+    <p class="muted" style="margin:8px 0 0">공개 글만 읽습니다. 로그인·비공개·접근 제한 글은 우회하지 않고 원인을 보여 줍니다.</p>
+    <div id="recent" class="muted" style="margin-top:8px"></div>
+  </section>
+
+  <section class="card" id="progressCard" hidden>
+    <div class="row" style="justify-content:space-between"><h2 id="stTitle">진행 상황</h2><span id="stBadge" class="pill"></span></div>
+    <div class="bar"><i id="bar"></i></div>
+    <p id="stMsg" class="muted"></p>
+    <details><summary class="muted">작업 로그</summary><pre id="logs"></pre></details>
+  </section>
+
+  <div class="layout">
+    <div>
+      <section class="card" id="reportCard" hidden>
+        <h2>추출 결과</h2>
+        <div class="grid" id="stats"></div>
+        <div id="errors"></div>
+      </section>
+
+      <section class="card" id="scriptCard" hidden>
+        <div class="row" style="justify-content:space-between"><h2 style="margin:0">대본·장면 <span id="mode" class="pill"></span></h2>
+          <div class="row"><button class="ghost" id="saveScript">수정 저장</button><button class="ghost" id="aiBtn">AI로 다시 쓰기(유료)</button></div></div>
+        <label class="muted">엔딩 상단 문구</label><input id="endHeader" style="width:100%">
+        <div id="scenes"></div>
+      </section>
+    </div>
+
+    <div>
+      <section class="card" id="renderCard" hidden>
+        <h2>영상 만들기</h2>
+        <label class="muted">음성(모두 무료)</label>
+        <select id="tts" style="width:100%;margin-bottom:10px">
+          <option value="auto">자동: Edge 무료 음성 → 실패 시 오프라인 음성</option>
+          <option value="edge">Edge 무료 음성(인터넷 필요, 고품질)</option>
+          <option value="local">오프라인 음성(PC 내장, 인터넷 불필요)</option>
+        </select>
+        <button id="renderBtn" style="width:100%">영상 만들기</button>
+        <div id="result" style="margin-top:14px"></div>
+      </section>
+
+      <section class="card">
+        <h2>이번 영상 비용</h2>
+        <div class="grid" id="usage"><div class="stat"><b>0원</b><span class="muted">AI 사용 없음</span></div></div>
+        <p class="muted">기본값은 AI 없이 무료로 동작합니다. 유료 AI는 예상 비용 확인과 승인 후에만 호출됩니다.</p>
+      </section>
+    </div>
+  </div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+let jobId = null, timer = null, lastScriptKey = '', images = {};
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const STATUS = {created:'대기', extracting:'추출 중', ready:'대본 준비됨', ai:'AI 작성 중', rendering:'영상 합성 중', done:'완료', error:'실패'};
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j;
+}
+async function loadRecent() {
+  try { const s = await api('/api/status');
+    if (!s.ffmpeg) $('#recent').innerHTML = '<span class="bad">FFmpeg를 찾지 못했습니다. README의 설치 방법을 확인하세요.</span>';
+    else $('#recent').innerHTML = s.jobs.length ? '최근 작업: ' + s.jobs.slice(0,6).map(j => `<a href="#${j.id}">${esc(j.title || j.id)}</a> <span class="pill">${STATUS[j.status]||j.status}</span>`).join(' · ') : '';
+  } catch (e) {}
+}
+$('#go').onclick = async () => {
+  const url = $('#url').value.trim(); if (!url) return;
+  try { const r = await api('/api/jobs', {url}); open(r.id); } catch (e) { alert(e.message); }
+};
+function open(id) { jobId = id; location.hash = id; lastScriptKey = ''; $('#result').innerHTML=''; poll(); clearInterval(timer); timer = setInterval(poll, 1000); }
+
+async function poll() {
+  if (!jobId) return;
+  let j; try { j = await api('/api/jobs/' + jobId); } catch (e) { return; }
+  $('#progressCard').hidden = false;
+  $('#stBadge').textContent = STATUS[j.status] || j.status;
+  $('#stBadge').className = 'pill ' + (j.status === 'error' ? 'bad' : j.status === 'done' ? 'ok' : '');
+  $('#bar').style.width = j.progress + '%';
+  $('#stMsg').textContent = j.error ? '오류: ' + j.error : j.message;
+  $('#logs').textContent = j.logs.join('\n');
+  if (!$('#url').value) $('#url').value = j.url;
+  images = {}; (j.images || []).forEach(im => images[im.index] = im);
+  renderReport(j.report);
+  renderUsage(j.usage);
+  const busy = ['extracting','ai','rendering'].includes(j.status);
+  if (j.script) {
+    const key = JSON.stringify(j.script);
+    if (key !== lastScriptKey && !busy) { renderScript(j.script); lastScriptKey = key; }
+    $('#scriptCard').hidden = false; $('#renderCard').hidden = false;
+  }
+  $('#renderBtn').disabled = busy || !j.script; $('#aiBtn').disabled = busy; $('#saveScript').disabled = busy;
+  if (j.result && j.status === 'done') renderResult(j.result);
+  if (!busy && j.status !== 'created') { clearInterval(timer); timer = null; loadRecent(); }
+}
+function renderReport(r) {
+  if (!r) return; $('#reportCard').hidden = false;
+  const s = (v, k, cls='') => `<div class="stat"><b class="${cls}">${v}</b><span class="muted">${k}</span></div>`;
+  $('#stats').innerHTML = s(esc(r.title || '(제목 없음)'), '게시글 제목') + s(r.body_ok ? '성공' : '실패', `본문 추출 (${r.body_chars}자)`, r.body_ok ? 'ok' : 'bad')
+    + s(r.images_found + '장', '본문 사진 발견') + s(r.images_downloaded + '장', '다운로드 성공', r.images_downloaded === r.images_found ? 'ok' : 'warn')
+    + s(r.excluded_images + '장', '제외(프로필·스티커·아이콘 등)');
+  const skipped = r.skipped_components.length ? `<p class="muted">영상에 쓰지 않은 요소: ${r.skipped_components.map(esc).join(', ')}</p>` : '';
+  $('#errors').innerHTML = skipped + (r.errors.length ? '<p class="bad"><b>읽지 못한 부분·오류</b><br>' + r.errors.map(esc).join('<br>') + '</p>' : '<p class="ok">오류 없음</p>');
+}
+function renderUsage(u) {
+  const s = (v, k) => `<div class="stat"><b>${v}</b><span class="muted">${k}</span></div>`;
+  $('#usage').innerHTML = s(u.ai_calls ? `${Math.round(u.krw).toLocaleString()}원` : '0원', u.ai_calls ? `AI $${u.usd}` : 'AI 사용 없음')
+    + s((u.input_tokens + u.output_tokens).toLocaleString(), `토큰 (입력 ${u.input_tokens} / 출력 ${u.output_tokens})`)
+    + s(u.ai_calls + '회', 'AI 호출') + s('0원', esc(u.tts || '음성: 무료'));
+}
+function renderScript(sc) {
+  $('#mode').textContent = sc.mode === 'ai' ? 'AI 대본' : '무료 규칙 기반';
+  $('#endHeader').value = sc.end_header;
+  $('#scenes').innerHTML = sc.scenes.map((s, i) => `
+    <div class="scene" data-kind="${s.kind}">
+      <div><div class="muted">${i + 1}. ${s.kind === 'hook' ? '오프닝' : s.kind === 'cta' ? '엔딩(CTA)' : '본문'}</div>
+        <div class="thumbs">${s.images.map(n => images[n] ? `<img src="${images[n].url}" title="사진 ${n}">` : '').join('')}</div></div>
+      <div>
+        <label>상단 문구</label><input class="lab" value="${esc(s.label)}">
+        <label>내레이션(자막)</label><textarea class="nar" rows="2">${esc(s.narration)}</textarea>
+        <div class="row"><div style="flex:1"><label>강조 단어(쉼표 구분)</label><input class="hl" value="${esc(s.highlight)}"></div>
+          <div style="flex:1"><label>사진 번호(쉼표 구분)</label><input class="imgs" value="${s.images.join(', ')}" ${s.kind==='cta'?'disabled':''}></div></div>
+      </div>
+    </div>`).join('');
+}
+function collectScript() {
+  return {end_header: $('#endHeader').value, scenes: [...document.querySelectorAll('.scene')].map(el => ({
+    kind: el.dataset.kind, label: el.querySelector('.lab').value, narration: el.querySelector('.nar').value,
+    highlight: el.querySelector('.hl').value,
+    images: el.querySelector('.imgs').value.split(',').map(x => parseInt(x)).filter(n => !isNaN(n))}))};
+}
+$('#saveScript').onclick = async () => { try { await api(`/api/jobs/${jobId}/script`, collectScript()); lastScriptKey=''; poll(); } catch (e) { alert(e.message); } };
+$('#aiBtn').onclick = async () => {
+  try {
+    const e = await api(`/api/jobs/${jobId}/ai_estimate`);
+    if (!e.api_key_found) return alert('ANTHROPIC_API_KEY가 설정되어 있지 않습니다. 무료 대본을 그대로 쓰거나, README의 AI 설정을 참고하세요.');
+    const ok = confirm(`AI 대본 작성 예상 비용\n\n모델: ${e.model}\n입력 약 ${e.input_tokens_est.toLocaleString()} 토큰, 출력 최대 약 ${e.output_tokens_est.toLocaleString()} 토큰\n예상: 약 $${e.usd_est} (약 ${e.krw_est}원)\n\n실제 사용량은 실행 후 '이번 영상 비용'에 기록됩니다. 진행할까요?`);
+    if (!ok) return;
+    await api(`/api/jobs/${jobId}/ai_script`, {approved: true}); lastScriptKey=''; open(jobId);
+  } catch (err) { alert(err.message); }
+};
+$('#renderBtn').onclick = async () => {
+  try { await api(`/api/jobs/${jobId}/script`, collectScript()); await api(`/api/jobs/${jobId}/render`, {tts_engine: $('#tts').value}); $('#result').innerHTML=''; open(jobId); }
+  catch (e) { alert(e.message); }
+};
+function renderResult(r) {
+  if ($('#result').dataset.v === r.video_url + r.seconds) return; $('#result').dataset.v = r.video_url + r.seconds;
+  $('#result').innerHTML = `<video controls src="${r.video_url}?t=${Date.now()}"></video>
+    <p><a href="${r.video_url}" download>MP4 내려받기</a> · <a href="${r.srt_url}" download>자막(SRT)</a></p>
+    <p class="muted">${r.seconds}초 · 1080×1920 · 30fps · H.264 · 사진 ${r.images_used}/${r.images_total}장<br>저장 위치: ${esc(r.video)}</p>
+    ${r.warnings.map(w => `<p class="warn">주의: ${esc(w)}</p>`).join('')}`;
+}
+window.onhashchange = () => { const id = location.hash.slice(1); if (id && id !== jobId) open(id); };
+loadRecent(); if (location.hash.length > 1) open(location.hash.slice(1));
+</script>
+</body>
+</html>
