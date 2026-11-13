@@ -4,3 +4,4 @@ output/
 extracted_images/
 settings.local.json
 .venv/
+.env
