@@ -9,6 +9,8 @@
     NAVER_CLIENT_ID=...
     NAVER_CLIENT_SECRET=...
     (선택) NAVER_CAFE_API_URL=https://openapi.naver.com/v1/search/cafearticle.json
+클라우드 환경에서 키를 '네트워크 비밀값'으로 저장했다면 .env 없이
+    NAVER_KEYS_VIA_PROXY=1 python3 scripts/cafe_leads.py
 
 사용:
     python scripts/cafe_leads.py                # 검색 + 새 글 저장 + seen.json 갱신
@@ -166,6 +168,11 @@ def main() -> int:
     env = load_env()
     cid, secret = env.get("NAVER_CLIENT_ID"), env.get("NAVER_CLIENT_SECRET")
     url = env.get("NAVER_CAFE_API_URL") or DEFAULT_URL
+    # 클라우드 환경: 키를 네트워크 비밀값으로 저장해 두면 프록시가 요청에 진짜 키를 넣어 준다.
+    # 이때 코드에는 키가 없으므로 자리표시 값만 보낸다.
+    if os.environ.get("NAVER_KEYS_VIA_PROXY") == "1":
+        cid = cid or "via-proxy"
+        secret = secret or "via-proxy"
     if not cid or not secret:
         print("오류: .env 에 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 이 없습니다. (값은 출력하지 않음)", file=sys.stderr)
         return 2
