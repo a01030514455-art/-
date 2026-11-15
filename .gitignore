@@ -4,3 +4,7 @@ output/
 extracted_images/
 settings.local.json
 .venv/
+
+# 카페 손님 찾기
+.env
+data/candidates_*.json
